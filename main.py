@@ -13,10 +13,9 @@ if not API_TOKEN:
 
 bot = telebot.TeleBot(API_TOKEN)
 
-# برای هر کاربر یک لیست ولت ذخیره می‌کنیم
 user_wallets = {}
 previous_positions = {}
-user_intervals = {}  # بازه گزارش‌دهی هر کاربر
+user_intervals = {}
 
 # ---------- ابزارهای کمکی ----------
 def _safe_float(x, default=0.0):
@@ -32,50 +31,57 @@ def _sign_fmt(x):
     else:
         return f"🔴 {v:,.2f}"
 
-# نرمال‌سازی داده‌ها از hyperdash
+# ================== نرمال‌سازی پوزیشن ==================
 def _normalize_from_hyperdash(raw):
     out = []
-    items = []
     if isinstance(raw, list):
         items = raw
     elif isinstance(raw, dict):
         for key in ("positions", "openPositions", "data"):
             if key in raw and isinstance(raw[key], list):
-                items = raw[key]
+                raw = raw[key]
                 break
+        items = raw if isinstance(raw, list) else []
+    else:
+        items = []
     for p in items:
-        pair = p.get("pair") or p.get("symbol") or p.get("coin")
+        pair = p.get("pair") or p.get("symbol") or p.get("coin") or p.get("name")
         side = (p.get("side") or p.get("positionSide") or "").upper()
-        size = _safe_float(p.get("size") or p.get("amount") or p.get("qty"))
-        entry = _safe_float(p.get("entryPrice") or p.get("avgEntryPrice"))
-        mark = _safe_float(p.get("markPrice") or p.get("price"))
-        pnl  = _safe_float(p.get("unrealizedPnl") or p.get("pnl"))
+        size = _safe_float(p.get("size") or p.get("amount") or p.get("qty") or 0)
+        entry = _safe_float(p.get("entryPrice") or p.get("entry") or p.get("avgEntryPrice") or 0)
+        mark = _safe_float(p.get("markPrice") or p.get("mark") or p.get("price") or 0)
+        pnl  = _safe_float(p.get("unrealizedPnl") or p.get("uPnl") or p.get("pnl") or 0)
+        base_id = p.get("id") or p.get("positionId")
+        if not base_id:
+            base_id = f"HD:{pair}:{side}"
         if abs(size) > 0:
-            uid = f"HD:{pair}:{side}"
             out.append({
-                "uid": uid,
+                "uid": str(base_id),
                 "pair": pair or "UNKNOWN",
                 "side": side or ("LONG" if size > 0 else "SHORT"),
                 "size": abs(size),
                 "entryPrice": entry,
-                "markPrice": mark,
+                "markPrice": mark if mark else None,
                 "unrealizedPnl": pnl
             })
     return out
 
-# نرمال‌سازی از hyperliquid
 def _normalize_from_hyperliquid(raw):
     out = []
-    items = raw.get("assetPositions", []) if isinstance(raw, dict) else raw
+    items = []
+    if isinstance(raw, dict):
+        items = raw.get("assetPositions", [])
+    elif isinstance(raw, list):
+        items = raw
     for p in items:
         try:
             pos = p.get("position", {})
-            szi = _safe_float(pos.get("szi"))
+            szi = _safe_float(pos.get("szi"), 0)
             if szi == 0:
                 continue
             coin = pos.get("coin") or "UNKNOWN"
-            entry = _safe_float(pos.get("entryPx"))
-            pnl = _safe_float(pos.get("unrealizedPnl"))
+            entry = _safe_float(pos.get("entryPx"), 0)
+            pnl = _safe_float(pos.get("unrealizedPnl"), 0)
             side = "LONG" if szi > 0 else "SHORT"
             uid = f"HL:{coin}:{side}"
             out.append({
@@ -87,27 +93,29 @@ def _normalize_from_hyperliquid(raw):
                 "markPrice": None,
                 "unrealizedPnl": pnl
             })
-        except:
+        except Exception:
             continue
     return out
 
-# گرفتن پوزیشن‌ها
 def get_positions(wallet):
     try:
-        r = requests.get(f"https://hyperdash.info/api/v1/trader/{wallet}/positions", timeout=10)
+        url = f"https://hyperdash.info/api/v1/trader/{wallet}/positions"
+        r = requests.get(url, timeout=10)
         if r.status_code == 200:
             norm = _normalize_from_hyperdash(r.json())
             if norm:
                 return norm
-    except:
-        pass
+    except Exception as e:
+        print(f"[HyperDash] error for {wallet}: {e}")
     try:
         url = "https://api.hyperliquid.xyz/info"
         payload = {"type": "clearinghouseState", "user": wallet}
         r = requests.post(url, json=payload, timeout=12)
+        r.raise_for_status()
         norm = _normalize_from_hyperliquid(r.json())
         return norm
-    except:
+    except Exception as e:
+        print(f"[Hyperliquid] error for {wallet}: {e}")
         return []
 
 def send_message(chat_id, text):
@@ -115,12 +123,12 @@ def send_message(chat_id, text):
 
 def format_position_line(p):
     lines = [
-        f"🪙 *{p.get('pair','?')}* | {('🟢 LONG' if p['side']=='LONG' else '🔴 SHORT')}",
-        f"🔢 Size: {p['size']}",
-        f"🎯 Entry: {p['entryPrice']}",
+        f"🪙 *{p.get('pair','?')}* | {('🟢 LONG' if p.get('side')=='LONG' else '🔴 SHORT')}",
+        f"🔢 Size: {p.get('size','?')}",
+        f"🎯 Entry: {p.get('entryPrice','?')}",
     ]
     if p.get("markPrice") is not None:
-        lines.append(f"📍 Mark: {p['markPrice']}")
+        lines.append(f"📍 Mark: {p.get('markPrice')}")
     lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
     return "\n".join(lines)
 
@@ -133,24 +141,25 @@ def check_positions():
             current_map = {p["uid"]: p for p in current_positions}
             prev_map    = {p["uid"]: p for p in prev_positions}
             
-            # باز شدن پوزیشن
             for uid, pos in current_map.items():
                 if uid not in prev_map:
                     msg = (
                         "🚀 *Position Opened*\n"
-                        f"💼 (`{wallet}`)\n━━━━━━━━━━\n{format_position_line(pos)}"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
+                        f"{format_position_line(pos)}"
                     )
                     send_message(chat_id, msg)
             
-            # بسته شدن پوزیشن
             for uid, pos in prev_map.items():
                 if uid not in current_map:
                     msg = (
                         "✅ *Position Closed*\n"
-                        f"💼 (`{wallet}`)\n━━━━━━━━━━\n"
-                        f"🪙 *{pos['pair']}* | {('🟢 LONG' if pos['side']=='LONG' else '🔴 SHORT')}\n"
-                        f"🔢 Size: {pos['size']}\n"
-                        f"🎯 Entry: {pos['entryPrice']}\n"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
+                        f"🪙 *{pos.get('pair','?')}* | {('🟢 LONG' if pos.get('side')=='LONG' else '🔴 SHORT')}\n"
+                        f"🔢 Size: {pos.get('size')}\n"
+                        f"🎯 Entry: {pos.get('entryPrice')}\n"
                         f"💵 Final PNL: {_sign_fmt(pos.get('unrealizedPnl',0))}\n"
                         "🔚 پوزیشن بسته شد."
                     )
@@ -171,76 +180,51 @@ def periodic_report():
                 body = "\n\n".join([format_position_line(p) for p in current_positions])
                 send_message(chat_id, f"{header}\n{body}")
             else:
-                send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
+                send_message(chat_id, f"{header}\n⏳ در حال حاضر هیچ پوزیشنی باز نیست.")
 
-# ================== گزارش ۱۰ ارز برتر ==================
-def get_top10():
+# ================== گزارش 10 ارز برتر ==================
+def fetch_top10_report():
     try:
-        r = requests.get("https://api.coingecko.com/api/v3/coins/markets",
-                         params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1},
-                         timeout=10)
-        data = r.json()
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        coins = r.json()
     except Exception as e:
-        return f"⚠️ خطا در گرفتن اطلاعات بازار: {e}"
+        return f"❌ خطا در گرفتن داده‌های CoinGecko: {e}"
 
-    lines = ["📊 *ده ارز برتر بازار و لانگ/شورت ریشیو*:"]
-    for c in data:
-        symbol = (c.get("symbol") or "").upper()
-        name   = c.get("name")
-        price  = c.get("current_price")
-        change = c.get("price_change_percentage_24h")
-
-        long_pct = short_pct = "?"
-
+    report_lines = ["📊 *Top 10 Coins with Long/Short Data*"]
+    for c in coins:
+        symbol = c["symbol"].upper()
+        price = c["current_price"]
+        change = c["price_change_percentage_24h"]
+        
         try:
-            url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
-            resp = requests.get(url, params={"symbol": f"{symbol}USDT", "period": "5m", "limit": 1}, timeout=8)
-            if resp.status_code == 200:
-                ratios = resp.json()
-                if ratios:
-                    long_ratio = float(ratios[0]["longAccount"])
-                    short_ratio = float(ratios[0]["shortAccount"])
-                    total = long_ratio + short_ratio
-                    if total > 0:
-                        long_pct = round((long_ratio / total) * 100, 1)
-                        short_pct = round((short_ratio / total) * 100, 1)
-        except:
-            pass
-
-        lines.append(
-            f"🪙 {name} (${price:,.2f}, {change:+.2f}%)\n"
-            f"   🟢 Long: {long_pct}% | 🔴 Short: {short_pct}%"
+            bybit_symbol = f"{symbol}USDT"
+            r2 = requests.get(
+                "https://api.bybit.com/v5/market/account-ratio",
+                params={"symbol": bybit_symbol, "period": "1h"},
+                timeout=10
+            )
+            if r2.status_code == 200 and "result" in r2.json():
+                result = r2.json()["result"]["list"]
+                if result:
+                    last = result[-1]
+                    long_ratio = float(last["buyRatio"]) * 100
+                    short_ratio = float(last["sellRatio"]) * 100
+                    ls_text = f"🟢 Long: {long_ratio:.1f}% | 🔴 Short: {short_ratio:.1f}%"
+                else:
+                    ls_text = "ℹ️ داده لانگ/شورت موجود نیست"
+            else:
+                ls_text = "ℹ️ لانگ/شورت در دسترس نیست"
+        except Exception:
+            ls_text = "ℹ️ لانگ/شورت در دسترس نیست"
+        
+        report_lines.append(
+            f"🪙 *{c['name']}* ({symbol})\n💵 Price: ${price:,.2f}\n📈 24h: {change:.2f}%\n{ls_text}\n━━━━━━━━━━"
         )
-
-    return "\n\n".join(lines)
-
-# ================== منوها ==================
-def send_interval_menu(chat_id):
-    markup = InlineKeyboardMarkup()
-    options = [
-        ("1 دقیقه", 1),
-        ("15 دقیقه", 15),
-        ("30 دقیقه", 30),
-        ("4 ساعت", 240),
-        ("24 ساعت", 1440),
-    ]
-    for text, val in options:
-        markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    markup.add(InlineKeyboardButton("📊 گزارش ۱۰ ارز برتر", callback_data="top10"))
-    bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن یا دکمه زیر:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    chat_id = call.message.chat.id
-    if call.data.startswith("interval_"):
-        val = int(call.data.split("_")[1])
-        user_intervals[chat_id] = val
-        bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
-        send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* برای شما ارسال خواهد شد.")
-    elif call.data == "top10":
-        bot.answer_callback_query(call.id)
-        report = get_top10()
-        send_message(chat_id, report)
+    
+    return "\n".join(report_lines)
 
 # ================== دستورات ==================
 @bot.message_handler(commands=['start'])
@@ -248,14 +232,26 @@ def start(message):
     chat_id = message.chat.id
     user_wallets.setdefault(chat_id, [])
     user_intervals[chat_id] = 1
-    send_message(chat_id, "سلام 👋\nولت‌هات رو یکی یکی بفرست.\n\n"
-                          "دستور /stop برای توقف.\n"
-                          "دستور /interval برای تغییر زمان گزارش.")
-    send_interval_menu(chat_id)
+    send_message(chat_id, "سلام 👋\nآدرس ولت‌هات رو یکی یکی بفرست.\n"
+                          "برای تغییر زمان‌بندی گزارش /interval رو بزن.\n"
+                          "برای دیدن 10 ارز برتر /top10 رو بزن.")
 
 @bot.message_handler(commands=['interval'])
 def interval(message):
-    send_interval_menu(message.chat.id)
+    chat_id = message.chat.id
+    markup = InlineKeyboardMarkup()
+    options = [("1 دقیقه", 1), ("15 دقیقه", 15), ("30 دقیقه", 30), ("4 ساعت", 240), ("24 ساعت", 1440)]
+    for text, val in options:
+        markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
+    bot.send_message(chat_id, "⏱ بازه زمانی گزارش رو انتخاب کن:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
+def callback_interval(call):
+    chat_id = call.message.chat.id
+    val = int(call.data.split("_")[1])
+    user_intervals[chat_id] = val
+    bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
+    send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* ارسال خواهد شد.")
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
@@ -264,7 +260,13 @@ def stop(message):
     keys_to_remove = [k for k in previous_positions if k[0] == chat_id]
     for k in keys_to_remove:
         previous_positions.pop(k, None)
-    send_message(chat_id, "🛑 مانیتورینگ متوقف شد. برای شروع دوباره ولت جدید بفرست.")
+    send_message(chat_id, "🛑 مانیتورینگ متوقف شد.")
+
+@bot.message_handler(commands=['top10'])
+def top10(message):
+    chat_id = message.chat.id
+    report = fetch_top10_report()
+    send_message(chat_id, report)
 
 @bot.message_handler(func=lambda m: True)
 def add_wallet(message):
@@ -272,12 +274,13 @@ def add_wallet(message):
     wallet = message.text.strip()
     if not wallet:
         return
-    if wallet in user_wallets.get(chat_id, []):
+    user_wallets.setdefault(chat_id, [])
+    if wallet in user_wallets[chat_id]:
         send_message(chat_id, f"⚠️ ولت `{wallet}` از قبل اضافه شده.")
         return
-    user_wallets.setdefault(chat_id, []).append(wallet)
+    user_wallets[chat_id].append(wallet)
     previous_positions[(chat_id, wallet)] = get_positions(wallet)
-    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتور میشه.")
+    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و از همین الان مانیتور میشه.")
 
 # ================== اجرا ==================
 schedule.every(1).minutes.do(periodic_report)
