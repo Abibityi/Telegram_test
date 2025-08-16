@@ -179,7 +179,7 @@ def periodic_report():
 # ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
-        # 1) قیمت و تغییر ۲۴ساعت از CoinGecko
+        # قیمت و تغییر ۲۴ساعت از CoinGecko
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
         r = requests.get(url, params=params, timeout=10)
@@ -192,17 +192,7 @@ def get_top10_report():
             price = c.get("current_price", 0)
             change = c.get("price_change_percentage_24h", 0)
 
-            # 2) پوزیشن‌ها از CoinGlass
-            cg_long, cg_short = "-", "-"
-            try:
-                cg_url = f"https://open-api.coinglass.com/api/pro/v1/futures/liquidation_chart?symbol={symbol.upper()}"
-                cg_res = requests.get(cg_url, timeout=8)
-                if cg_res.status_code == 200 and "data" in cg_res.json():
-                    # ساده‌سازی: اینجا میشه دیتا رو parse کرد، ولی به خاطر محدودیت API کلید لازم داره
-                    pass
-            except: pass
-
-            # 3) پوزیشن‌ها از Binance Futures
+            # فقط پوزیشن‌ها از Binance Futures
             bin_long, bin_short = "-", "-"
             try:
                 b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
@@ -212,14 +202,14 @@ def get_top10_report():
                     if data:
                         bin_long = f"{float(data[0]['longAccount'])*100:.1f}%"
                         bin_short = f"{float(data[0]['shortAccount'])*100:.1f}%"
-            except: pass
+            except Exception as e:
+                print(f"[Binance] error for {symbol}: {e}")
 
             # خروجی نهایی برای هر کوین
             lines.append(
                 f"🪙 *{symbol}*\n"
                 f"💵 ${price:,.2f} ({change:+.2f}%)\n"
                 f"📊 Binance: 🟢 {bin_long} | 🔴 {bin_short}\n"
-                f"📊 CoinGlass: 🟢 {cg_long} | 🔴 {cg_short}\n"
                 "━━━━━━━━━━"
             )
 
@@ -317,4 +307,4 @@ def run_scheduler():
         time.sleep(2)
 
 threading.Thread(target=run_scheduler, daemon=True).start()
-bot.polling()                          
+bot.polling()
