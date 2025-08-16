@@ -4,6 +4,7 @@ import telebot
 import threading
 import requests
 import os
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
 API_TOKEN = os.environ.get("API_TOKEN")
@@ -16,6 +17,8 @@ bot = telebot.TeleBot(API_TOKEN)
 user_wallets = {}
 # کلید: (chat_id, wallet) → لیست پوزیشن‌های نرمال‌شده
 previous_positions = {}
+# زمان گزارش‌دهی برای هر کاربر (پیش‌فرض: 1 دقیقه)
+user_intervals = {}
 
 # ---------- ابزارهای کمکی ----------
 def _safe_float(x, default=0.0):
@@ -25,7 +28,6 @@ def _safe_float(x, default=0.0):
         return default
 
 def _sign_fmt(x):
-    """+ با سبز و - با قرمز، با دو رقم اعشار"""
     v = _safe_float(x, 0.0)
     if v >= 0:
         return f"✅ +{v:,.2f}"
@@ -155,18 +157,14 @@ def check_positions():
             # پوزیشن بسته شد
             for uid, pos in prev_map.items():
                 if uid not in current_map:
-                    entry = pos.get('entryPrice')
-                    size = pos.get('size')
-                    final_pnl = pos.get('unrealizedPnl', 0)
-
                     msg = (
                         "✅ *Position Closed*\n"
                         f"💼 (`{wallet}`)\n"
                         "━━━━━━━━━━\n"
                         f"🪙 *{pos.get('pair','?')}* | {('🟢 LONG' if pos.get('side')=='LONG' else '🔴 SHORT')}\n"
-                        f"🔢 Size: {size}\n"
-                        f"🎯 Entry: {entry}\n"
-                        f"💵 Final PNL: {_sign_fmt(final_pnl)}\n"
+                        f"🔢 Size: {pos.get('size')}\n"
+                        f"🎯 Entry: {pos.get('entryPrice')}\n"
+                        f"💵 Final PNL: {_sign_fmt(pos.get('unrealizedPnl',0))}\n"
                         "🔚 پوزیشن بسته شد."
                     )
                     send_message(chat_id, msg)
@@ -175,22 +173,57 @@ def check_positions():
 
 def periodic_report():
     for chat_id, wallets in user_wallets.items():
+        interval = user_intervals.get(chat_id, 1)  # پیش‌فرض 1 دقیقه
+        # فقط هر interval دقیقه یک بار گزارش بده
+        now_minute = int(time.time() / 60)
+        if now_minute % interval != 0:
+            continue
         for wallet in wallets:
             current_positions = get_positions(wallet)
-            header = f"🕒 *Periodic Report (1 min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
+            header = f"🕒 *Periodic Report ({interval} min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
             if current_positions:
                 body = "\n\n".join([format_position_line(p) for p in current_positions])
                 send_message(chat_id, f"{header}\n{body}")
             else:
                 send_message(chat_id, f"{header}\n⏳ در حال حاضر هیچ پوزیشنی باز نیست.")
 
+# ================== منو انتخاب زمان ==================
+def send_interval_menu(chat_id):
+    markup = InlineKeyboardMarkup()
+    options = [
+        ("1 دقیقه", 1),
+        ("15 دقیقه", 15),
+        ("30 دقیقه", 30),
+        ("4 ساعت", 240),
+        ("24 ساعت", 1440),
+    ]
+    for text, val in options:
+        markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
+    bot.send_message(chat_id, "⏱ لطفا بازه زمانی گزارش رو انتخاب کن:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
+def callback_interval(call):
+    chat_id = call.message.chat.id
+    val = int(call.data.split("_")[1])
+    user_intervals[chat_id] = val
+    bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
+    send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* برای شما ارسال خواهد شد.")
+
 # ================== دستورات ربات ==================
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     user_wallets.setdefault(chat_id, [])
+    user_intervals[chat_id] = 1  # پیش‌فرض
     send_message(chat_id, "سلام 👋\nآدرس ولت‌هات رو یکی یکی بفرست تا برات مانیتور کنم.\n\n"
-                          "برای توقف مانیتورینگ دستور /stop رو بزن.")
+                          "برای توقف مانیتورینگ دستور /stop رو بزن.\n"
+                          "برای تغییر زمان‌بندی گزارش دستور /interval رو بزن.")
+    send_interval_menu(chat_id)
+
+@bot.message_handler(commands=['interval'])
+def interval(message):
+    chat_id = message.chat.id
+    send_interval_menu(chat_id)
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
