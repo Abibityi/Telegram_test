@@ -1,4 +1,4 @@
-  import time
+import time
 import schedule
 import telebot
 import threading
