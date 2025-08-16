@@ -179,7 +179,7 @@ def periodic_report():
 # ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
-        # قیمت و تغییر ۲۴ساعت از CoinGecko
+        # گرفتن 10 کوین برتر از کوین‌گکو
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
         r = requests.get(url, params=params, timeout=10)
@@ -192,10 +192,13 @@ def get_top10_report():
             price = c.get("current_price", 0)
             change = c.get("price_change_percentage_24h", 0)
 
-            # فقط پوزیشن‌ها از Binance Futures
-            bin_long, bin_short = "-", "-"
+            # پیش‌فرض → خط‌چین
+            bin_long, bin_short = "—", "—"
+
+            # تست کنیم آیا توی بایننس فیوچرز وجود داره
             try:
-                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
+                futures_symbol = f"{symbol}USDT"
+                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={futures_symbol}&period=1h&limit=1"
                 b_res = requests.get(b_url, timeout=8)
                 if b_res.status_code == 200:
                     data = b_res.json()
@@ -203,9 +206,8 @@ def get_top10_report():
                         bin_long = f"{float(data[0]['longAccount'])*100:.1f}%"
                         bin_short = f"{float(data[0]['shortAccount'])*100:.1f}%"
             except Exception as e:
-                print(f"[Binance] error for {symbol}: {e}")
+                print(f"[Binance] {symbol} not in futures: {e}")
 
-            # خروجی نهایی برای هر کوین
             lines.append(
                 f"🪙 *{symbol}*\n"
                 f"💵 ${price:,.2f} ({change:+.2f}%)\n"
