@@ -4,6 +4,7 @@ import telebot
 import threading
 import requests
 import os
+from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
@@ -179,7 +180,6 @@ def periodic_report():
 # ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
-        # گرفتن 10 کوین برتر از کوین‌گکو
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
         r = requests.get(url, params=params, timeout=10)
@@ -192,10 +192,8 @@ def get_top10_report():
             price = c.get("current_price", 0)
             change = c.get("price_change_percentage_24h", 0)
 
-            # پیش‌فرض → خط‌چین
             bin_long, bin_short = "—", "—"
 
-            # تست کنیم آیا توی بایننس فیوچرز وجود داره
             try:
                 futures_symbol = f"{symbol}USDT"
                 b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={futures_symbol}&period=1h&limit=1"
@@ -309,4 +307,19 @@ def run_scheduler():
         time.sleep(2)
 
 threading.Thread(target=run_scheduler, daemon=True).start()
+
+# ---- اضافه کردن Flask برای Render ----
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "🤖 Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ---- اجرای ربات تلگرام ----
 bot.polling()
