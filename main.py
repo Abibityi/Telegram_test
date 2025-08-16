@@ -13,9 +13,9 @@ if not API_TOKEN:
 
 bot = telebot.TeleBot(API_TOKEN)
 
+# برای هر کاربر یک لیست ولت ذخیره می‌کنیم
 user_wallets = {}
 previous_positions = {}
-user_intervals = {}
 
 # ---------- ابزارهای کمکی ----------
 def _safe_float(x, default=0.0):
@@ -26,12 +26,8 @@ def _safe_float(x, default=0.0):
 
 def _sign_fmt(x):
     v = _safe_float(x, 0.0)
-    if v >= 0:
-        return f"✅ +{v:,.2f}"
-    else:
-        return f"🔴 {v:,.2f}"
+    return f"🟢 +{v:,.2f}" if v >= 0 else f"🔴 {v:,.2f}"
 
-# ================== نرمال‌سازی پوزیشن ==================
 def _normalize_from_hyperdash(raw):
     out = []
     if isinstance(raw, list):
@@ -51,9 +47,7 @@ def _normalize_from_hyperdash(raw):
         entry = _safe_float(p.get("entryPrice") or p.get("entry") or p.get("avgEntryPrice") or 0)
         mark = _safe_float(p.get("markPrice") or p.get("mark") or p.get("price") or 0)
         pnl  = _safe_float(p.get("unrealizedPnl") or p.get("uPnl") or p.get("pnl") or 0)
-        base_id = p.get("id") or p.get("positionId")
-        if not base_id:
-            base_id = f"HD:{pair}:{side}"
+        base_id = p.get("id") or p.get("positionId") or f"HD:{pair}:{side}"
         if abs(size) > 0:
             out.append({
                 "uid": str(base_id),
@@ -68,11 +62,7 @@ def _normalize_from_hyperdash(raw):
 
 def _normalize_from_hyperliquid(raw):
     out = []
-    items = []
-    if isinstance(raw, dict):
-        items = raw.get("assetPositions", [])
-    elif isinstance(raw, list):
-        items = raw
+    items = raw.get("assetPositions", []) if isinstance(raw, dict) else raw
     for p in items:
         try:
             pos = p.get("position", {})
@@ -93,7 +83,7 @@ def _normalize_from_hyperliquid(raw):
                 "markPrice": None,
                 "unrealizedPnl": pnl
             })
-        except Exception:
+        except:
             continue
     return out
 
@@ -106,16 +96,15 @@ def get_positions(wallet):
             if norm:
                 return norm
     except Exception as e:
-        print(f"[HyperDash] error for {wallet}: {e}")
+        print(f"[HyperDash] error: {e}")
     try:
         url = "https://api.hyperliquid.xyz/info"
         payload = {"type": "clearinghouseState", "user": wallet}
         r = requests.post(url, json=payload, timeout=12)
         r.raise_for_status()
-        norm = _normalize_from_hyperliquid(r.json())
-        return norm
+        return _normalize_from_hyperliquid(r.json())
     except Exception as e:
-        print(f"[Hyperliquid] error for {wallet}: {e}")
+        print(f"[Hyperliquid] error: {e}")
         return []
 
 def send_message(chat_id, text):
@@ -132,7 +121,49 @@ def format_position_line(p):
     lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
     return "\n".join(lines)
 
-# ================== منطق مانیتورینگ ==================
+# ================== Top 10 Coins Report ==================
+def get_top10_report():
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
+        coins = requests.get(url, params=params, timeout=10).json()
+
+        report_lines = ["📊 *Top 10 Coins - Market & Long/Short Data*"]
+
+        for c in coins:
+            symbol = c["symbol"].upper() + "USDT"
+            name   = c["name"]
+            price  = c["current_price"]
+
+            # گرفتن نسبت لانگ/شورت از Binance
+            try:
+                url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+                params = {"symbol": symbol, "period": "5m", "limit": 1}
+                r = requests.get(url, params=params, timeout=10).json()
+                if isinstance(r, list) and r:
+                    d = r[0]
+                    long_pct  = float(d["longAccount"]) * 100
+                    short_pct = float(d["shortAccount"]) * 100
+                    ratio     = float(d["longShortRatio"])
+                    ls_info   = f"🟢 Long: {long_pct:.1f}% | 🔴 Short: {short_pct:.1f}% (📈 {ratio:.2f}x)"
+                else:
+                    ls_info = "⚠️ No L/S data"
+            except:
+                ls_info = "⚠️ Error fetching L/S"
+
+            line = (
+                f"\n━━━━━━━━━━━━━━\n"
+                f"🪙 *{name}*\n"
+                f"💵 Price: `${price:,}`\n"
+                f"{ls_info}"
+            )
+            report_lines.append(line)
+
+        return "\n".join(report_lines)
+    except Exception as e:
+        return f"❌ Error fetching top coins: {e}"
+
+# ================== منطق لحظه‌ای + دوره‌ای ==================
 def check_positions():
     for chat_id, wallets in user_wallets.items():
         for wallet in wallets:
@@ -141,6 +172,7 @@ def check_positions():
             current_map = {p["uid"]: p for p in current_positions}
             prev_map    = {p["uid"]: p for p in prev_positions}
             
+            # پوزیشن جدید باز شد
             for uid, pos in current_map.items():
                 if uid not in prev_map:
                     msg = (
@@ -151,6 +183,7 @@ def check_positions():
                     )
                     send_message(chat_id, msg)
             
+            # پوزیشن بسته شد
             for uid, pos in prev_map.items():
                 if uid not in current_map:
                     msg = (
@@ -169,103 +202,42 @@ def check_positions():
 
 def periodic_report():
     for chat_id, wallets in user_wallets.items():
-        interval = user_intervals.get(chat_id, 1)
-        now_minute = int(time.time() / 60)
-        if now_minute % interval != 0:
-            continue
         for wallet in wallets:
             current_positions = get_positions(wallet)
-            header = f"🕒 *Periodic Report ({interval} min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
+            header = f"🕒 *Periodic Report (1 min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
             if current_positions:
                 body = "\n\n".join([format_position_line(p) for p in current_positions])
                 send_message(chat_id, f"{header}\n{body}")
             else:
                 send_message(chat_id, f"{header}\n⏳ در حال حاضر هیچ پوزیشنی باز نیست.")
 
-# ================== گزارش 10 ارز برتر ==================
-def fetch_top10_report():
-    try:
-        url = "https://api.coingecko.com/api/v3/coins/markets"
-        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        coins = r.json()
-    except Exception as e:
-        return f"❌ خطا در گرفتن داده‌های CoinGecko: {e}"
-
-    report_lines = ["📊 *Top 10 Coins with Long/Short Data*"]
-    for c in coins:
-        symbol = c["symbol"].upper()
-        price = c["current_price"]
-        change = c["price_change_percentage_24h"]
-        
-        try:
-            bybit_symbol = f"{symbol}USDT"
-            r2 = requests.get(
-                "https://api.bybit.com/v5/market/account-ratio",
-                params={"symbol": bybit_symbol, "period": "1h"},
-                timeout=10
-            )
-            if r2.status_code == 200 and "result" in r2.json():
-                result = r2.json()["result"]["list"]
-                if result:
-                    last = result[-1]
-                    long_ratio = float(last["buyRatio"]) * 100
-                    short_ratio = float(last["sellRatio"]) * 100
-                    ls_text = f"🟢 Long: {long_ratio:.1f}% | 🔴 Short: {short_ratio:.1f}%"
-                else:
-                    ls_text = "ℹ️ داده لانگ/شورت موجود نیست"
-            else:
-                ls_text = "ℹ️ لانگ/شورت در دسترس نیست"
-        except Exception:
-            ls_text = "ℹ️ لانگ/شورت در دسترس نیست"
-        
-        report_lines.append(
-            f"🪙 *{c['name']}* ({symbol})\n💵 Price: ${price:,.2f}\n📈 24h: {change:.2f}%\n{ls_text}\n━━━━━━━━━━"
-        )
-    
-    return "\n".join(report_lines)
-
-# ================== دستورات ==================
+# ================== دستورات ربات ==================
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     user_wallets.setdefault(chat_id, [])
-    user_intervals[chat_id] = 1
-    send_message(chat_id, "سلام 👋\nآدرس ولت‌هات رو یکی یکی بفرست.\n"
-                          "برای تغییر زمان‌بندی گزارش /interval رو بزن.\n"
-                          "برای دیدن 10 ارز برتر /top10 رو بزن.")
-
-@bot.message_handler(commands=['interval'])
-def interval(message):
-    chat_id = message.chat.id
     markup = InlineKeyboardMarkup()
-    options = [("1 دقیقه", 1), ("15 دقیقه", 15), ("30 دقیقه", 30), ("4 ساعت", 240), ("24 ساعت", 1440)]
-    for text, val in options:
-        markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    bot.send_message(chat_id, "⏱ بازه زمانی گزارش رو انتخاب کن:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
-def callback_interval(call):
-    chat_id = call.message.chat.id
-    val = int(call.data.split("_")[1])
-    user_intervals[chat_id] = val
-    bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
-    send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* ارسال خواهد شد.")
+    markup.add(InlineKeyboardButton("📊 گزارش ۱۰ ارز برتر", callback_data="top10"))
+    send_message(chat_id, "سلام 👋\nآدرس ولت‌هات رو یکی یکی بفرست تا برات مانیتور کنم.\n\n"
+                          "برای توقف مانیتورینگ دستور /stop رو بزن.")
+    bot.send_message(chat_id, "👇 انتخاب کنید:", reply_markup=markup)
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
     chat_id = message.chat.id
-    user_wallets.pop(chat_id, None)
-    keys_to_remove = [k for k in previous_positions if k[0] == chat_id]
-    for k in keys_to_remove:
-        previous_positions.pop(k, None)
-    send_message(chat_id, "🛑 مانیتورینگ متوقف شد.")
+    if chat_id in user_wallets:
+        user_wallets.pop(chat_id, None)
+        keys_to_remove = [k for k in previous_positions if k[0] == chat_id]
+        for k in keys_to_remove:
+            previous_positions.pop(k, None)
+        send_message(chat_id, "🛑 مانیتورینگ متوقف شد.")
+    else:
+        send_message(chat_id, "⚠️ هیچ مانیتورینگی برای شما فعال نبود.")
 
-@bot.message_handler(commands=['top10'])
-def top10(message):
-    chat_id = message.chat.id
-    report = fetch_top10_report()
+@bot.callback_query_handler(func=lambda call: call.data == "top10")
+def handle_top10(call):
+    chat_id = call.message.chat.id
+    report = get_top10_report()
     send_message(chat_id, report)
 
 @bot.message_handler(func=lambda m: True)
