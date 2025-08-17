@@ -556,7 +556,7 @@ def callback_predict_btc_menu(call):
     mk.add(*buttons[3:])
     bot.send_message(chat_id, "⏳ یکی از بازه‌ها رو انتخاب کن:", reply_markup=mk)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("predict_btc_hours_")))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("predict_btc_hours_")
 def callback_predict_btc_hours(call):
     chat_id = call.message.chat.id
     try:
