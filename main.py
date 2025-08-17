@@ -1,4 +1,5 @@
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 import time
 import schedule
 import telebot
@@ -12,6 +13,15 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 API_TOKEN = os.environ.get("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("❌ API_TOKEN در متغیرهای محیطی تنظیم نشده")
+
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
+if not COINGECKO_API_KEY:
+    raise SystemExit("❌ COINGECKO_API_KEY در متغیرهای محیطی تنظیم نشده")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "x-cg-pro-api-key": COINGECKO_API_KEY
+}
 
 bot = telebot.TeleBot(API_TOKEN)
 
@@ -34,7 +44,7 @@ def _sign_fmt(x):
     else:
         return f"🔴 {v:,.2f}"
         
- # ---------- نرمال‌سازی داده‌های HyperDash ----------
+# ---------- نرمال‌سازی داده‌های HyperDash ----------
 def _normalize_from_hyperdash(raw):
     out = []
     items = raw if isinstance(raw, list) else []
@@ -91,8 +101,7 @@ def _normalize_from_hyperliquid(raw):
         except Exception:
             continue
     return out
-
-
+    
 # ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
     headers = {"User-Agent": "Mozilla/5.0"}  # جلوگیری از بلاک شدن
@@ -117,7 +126,8 @@ def get_positions(wallet):
         print(f"[Hyperliquid] error for {wallet}: {e}")
 
     return []
-    
+
+
 # ---------- فرمت پیام ----------
 def format_position_line(p):
     lines = [
@@ -136,8 +146,8 @@ def send_message(chat_id, text):
         bot.send_message(chat_id, text, parse_mode="Markdown")
     except Exception as e:
         print(f"[SendMessage Error] {e}")
-
-
+        
+        
 # ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
 def check_positions():
     for chat_id, wallets in user_wallets.items():
@@ -233,8 +243,8 @@ def get_top10_report():
 
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
-
-
+        
+        
 # ================== پیش‌بینی ۴ساعته BTC ==================
 
 def _ema(values, span):
@@ -300,6 +310,7 @@ def predict_btc_price(hours_ahead=4):
 
     last_price = closes[-1]
 
+    # محاسبه بازده لگاریتمی
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
@@ -382,6 +393,7 @@ def build_btc_forecast_text(hours=4):
     )
     
 # ================== منو ==================
+
 def send_interval_menu(chat_id):
     markup = InlineKeyboardMarkup()
     options = [
@@ -421,9 +433,9 @@ def callback_predict_btc_4h(call):
     bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
     text = build_btc_forecast_text(hours=4)
     send_message(chat_id, text)
-
-
+   
 # ================== دستورات ==================
+
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -476,7 +488,6 @@ def add_wallet(message):
         return
     user_wallets.setdefault(chat_id, []).append(wallet)
     send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-    
     
 # ================== اجرای زمان‌بندی ==================
 
