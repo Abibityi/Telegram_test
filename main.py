@@ -8,6 +8,7 @@ import math
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
+
 API_TOKEN = os.environ.get("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("❌ API_TOKEN در متغیرهای محیطی تنظیم نشده")
@@ -15,11 +16,13 @@ if not API_TOKEN:
 bot = telebot.TeleBot(API_TOKEN)
 
 # برای هر کاربر یک لیست ولت ذخیره می‌کنیم
+
 user_wallets = {}
 previous_positions = {}   # کلید: (chat_id, wallet)
 user_intervals = {}
 
 # ---------- ابزارهای کمکی ----------
+
 def _safe_float(x, default=0.0):
     try:
         return float(x)
@@ -34,6 +37,7 @@ def _sign_fmt(x):
         return f"🔴 {v:,.2f}"
 
 # ---------- نرمال‌سازی داده‌های HyperDash ----------
+
 def _normalize_from_hyperdash(raw):
     out = []
     items = raw if isinstance(raw, list) else []
@@ -63,6 +67,7 @@ def _normalize_from_hyperdash(raw):
     return out
 
 # ---------- نرمال‌سازی داده‌های Hyperliquid ----------
+
 def _normalize_from_hyperliquid(raw):
     out = []
     items = raw.get("assetPositions", []) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
@@ -89,7 +94,6 @@ def _normalize_from_hyperliquid(raw):
         except Exception:
             continue
     return out
-
 def get_positions(wallet):
     try:
         url = f"https://hyperdash.info/api/v1/trader/{wallet}/positions"
@@ -100,6 +104,7 @@ def get_positions(wallet):
                 return norm
     except Exception as e:
         print(f"[HyperDash] error for {wallet}: {e}")
+
     try:
         url = "https://api.hyperliquid.xyz/info"
         payload = {"type": "clearinghouseState", "user": wallet}
@@ -108,9 +113,11 @@ def get_positions(wallet):
         return _normalize_from_hyperliquid(r.json())
     except Exception as e:
         print(f"[Hyperliquid] error for {wallet}: {e}")
-        return []
+
+    return []
 
 # ---------- فرمت پیام ----------
+
 def format_position_line(p):
     lines = [
         f"🪙 *{p.get('pair','?')}* | {('🟢 LONG' if p.get('side')=='LONG' else '🔴 SHORT')}",
@@ -126,11 +133,13 @@ def send_message(chat_id, text):
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
 # ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
+
 def check_positions():
     for chat_id, wallets in user_wallets.items():
         for wallet in wallets:
             current_positions = get_positions(wallet)
             prev_positions = previous_positions.get((chat_id, wallet), [])
+
             current_map = {p["uid"]: p for p in current_positions}
             prev_map    = {p["uid"]: p for p in prev_positions}
 
@@ -161,13 +170,15 @@ def check_positions():
                     send_message(chat_id, msg)
 
             previous_positions[(chat_id, wallet)] = current_positions
-            
+
+
 def periodic_report():
     for chat_id, wallets in user_wallets.items():
         interval = user_intervals.get(chat_id, 1)
         now_minute = int(time.time() / 60)
         if now_minute % interval != 0:
             continue
+
         for wallet in wallets:
             current_positions = get_positions(wallet)
             header = f"🕒 *Periodic Report ({interval} min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
@@ -178,6 +189,7 @@ def periodic_report():
                 send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
 
 # ================== گزارش ۱۰ ارز برتر ==================
+
 def get_top10_report():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -216,7 +228,9 @@ def get_top10_report():
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
 
+
 # ================== پیش‌بینی ۴ساعته BTC ==================
+
 def _ema(values, span):
     if not values:
         return 0.0
@@ -243,6 +257,7 @@ def _rsi(values, period=14):
     rs = up_avg / down_avg
     return 100 - (100 / (1 + rs))
 
+
 def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
@@ -253,22 +268,37 @@ def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     times  = [int(k[0]) for k in data]
     return times, closes
 
+
+def _fetch_coingecko_closes(symbol="bitcoin", interval="hourly", days=7):
+    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
+    params = {"vs_currency": "usd", "days": days, "interval": interval}
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    closes = [float(p[1]) for p in data["prices"]]
+    times  = [int(p[0]) for p in data["prices"]]
+    return times, closes
 def predict_btc_price(hours_ahead=4):
     try:
         _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
+        source = "Binance (5m)"
     except Exception as e:
-        return {"error": f"خطا در دریافت داده از بایننس: {e}"}
+        print(f"[Binance Error] {e} → fallback به CoinGecko")
+        _, closes = _fetch_coingecko_closes("bitcoin", "hourly", 7)
+        source = "CoinGecko (1h)"
 
     if len(closes) < 60:
         return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
 
     last_price = closes[-1]
+
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
         if c0 <= 0:
             continue
         rets.append(math.log(c1 / c0))
+
     if not rets:
         return {"error": "عدم امکان محاسبه بازده‌ها."}
 
@@ -312,22 +342,28 @@ def predict_btc_price(hours_ahead=4):
         "mu_adj": mu_adj,
         "trend": trend,
         "rsi": rsi_val,
-        "n": n
+        "n": n,
+        "source": source
     }
+
 
 def build_btc_forecast_text(hours=4):
     res = predict_btc_price(hours)
     if "error" in res:
         return f"⚠️ {res['error']}"
+
     last  = res["last"]
     point = res["point"]
     l68, u68 = res["ci68"]
     l95, u95 = res["ci95"]
     rsi_val = res["rsi"]
     trend = res["trend"] * 100
+    source = res["source"]
+
     return (
         "🔮 *BTC 4h Forecast*\n"
-        f"⏱ افق: {hours} ساعت (۵ دقیقه‌ای × {res['n']})\n"
+        f"⏱ افق: {hours} ساعت ({res['n']} کندل)\n"
+        f"📊 منبع داده: {source}\n"
         f"💵 قیمت فعلی: ${last:,.2f}\n"
         f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
         f"📏 بازه ۶۸٪: ${l68:,.2f} — ${u68:,.2f}\n"
@@ -337,7 +373,9 @@ def build_btc_forecast_text(hours=4):
         "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
         "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
     )
-    # ================== منو ==================
+    
+# ================== منو ==================
+
 def send_interval_menu(chat_id):
     markup = InlineKeyboardMarkup()
     options = [
@@ -353,6 +391,7 @@ def send_interval_menu(chat_id):
     markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC", callback_data="predict_btc_4h"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
 def callback_interval(call):
     chat_id = call.message.chat.id
@@ -361,12 +400,14 @@ def callback_interval(call):
     bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
     send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* برای شما ارسال میشه.")
 
+
 @bot.callback_query_handler(func=lambda call: call.data == "top10")
 def callback_top10(call):
     chat_id = call.message.chat.id
     report = get_top10_report()
     bot.answer_callback_query(call.id, "📊 گزارش ارسال شد")
     send_message(chat_id, report)
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "predict_btc_4h")
 def callback_predict_btc_4h(call):
@@ -375,7 +416,9 @@ def callback_predict_btc_4h(call):
     text = build_btc_forecast_text(hours=4)
     send_message(chat_id, text)
 
+
 # ================== دستورات ==================
+
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -387,8 +430,9 @@ def start(message):
         "📍 /stop → توقف مانیتورینگ\n"
         "📍 /interval → تغییر بازه گزارش\n"
         "📍 /top10 → گزارش ۱۰ ارز برتر\n"
-        "📍 /predict → پیش‌بینی ۴ساعته BTC\n"
+        "📍 /predict → پیش‌بینی ۴ ساعته BTC"
     )
+
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
@@ -397,10 +441,12 @@ def stop(message):
     user_intervals.pop(chat_id, None)
     send_message(chat_id, "⏹ مانیتورینگ متوقف شد.")
 
+
 @bot.message_handler(commands=['interval'])
 def interval(message):
     chat_id = message.chat.id
     send_interval_menu(chat_id)
+
 
 @bot.message_handler(commands=['top10'])
 def top10(message):
@@ -408,36 +454,36 @@ def top10(message):
     report = get_top10_report()
     send_message(chat_id, report)
 
+
 @bot.message_handler(commands=['predict'])
 def predict(message):
     chat_id = message.chat.id
     text = build_btc_forecast_text(hours=4)
     send_message(chat_id, text)
 
-# ثبت ولت‌ها
-@bot.message_handler(func=lambda m: True)
+
+@bot.message_handler(func=lambda m: True, content_types=['text'])
 def add_wallet(message):
     chat_id = message.chat.id
     wallet = message.text.strip()
-    if not wallet:
+    if not wallet or len(wallet) < 5:
+        send_message(chat_id, "❌ ولت نامعتبره.")
         return
-    wallets = user_wallets.setdefault(chat_id, [])
-    if wallet not in wallets:
-        wallets.append(wallet)
-        send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-    else:
-        send_message(chat_id, f"ℹ️ ولت `{wallet}` قبلاً اضافه شده بود.")
+    user_wallets.setdefault(chat_id, []).append(wallet)
+    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
 
-# ================== زمان‌بندی ==================
+
+# ================== اجرای زمان‌بندی ==================
+
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
     schedule.every(1).minutes.do(periodic_report)
     while True:
         schedule.run_pending()
-        time.sleep(5)
+        time.sleep(1)
 
-t = threading.Thread(target=run_scheduler, daemon=True)
-t.start()
 
-print("🤖 Bot is running...")
+threading.Thread(target=run_scheduler, daemon=True).start()
+
+print("🤖 Bot started...")
 bot.infinity_polling()
