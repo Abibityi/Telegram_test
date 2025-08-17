@@ -4,7 +4,7 @@ import telebot
 import threading
 import requests
 import os
-from flask import Flask
+import math
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
@@ -192,11 +192,9 @@ def get_top10_report():
             price = c.get("current_price", 0)
             change = c.get("price_change_percentage_24h", 0)
 
-            bin_long, bin_short = "—", "—"
-
+            bin_long, bin_short = "-", "-"
             try:
-                futures_symbol = f"{symbol}USDT"
-                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={futures_symbol}&period=1h&limit=1"
+                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
                 b_res = requests.get(b_url, timeout=8)
                 if b_res.status_code == 200:
                     data = b_res.json()
@@ -204,7 +202,7 @@ def get_top10_report():
                         bin_long = f"{float(data[0]['longAccount'])*100:.1f}%"
                         bin_short = f"{float(data[0]['shortAccount'])*100:.1f}%"
             except Exception as e:
-                print(f"[Binance] {symbol} not in futures: {e}")
+                print(f"[Binance] error for {symbol}: {e}")
 
             lines.append(
                 f"🪙 *{symbol}*\n"
@@ -217,6 +215,130 @@ def get_top10_report():
 
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
+
+# ================== پیش‌بینی ۴ساعته BTC ==================
+def _ema(values, span):
+    if not values:
+        return 0.0
+    alpha = 2 / (span + 1.0)
+    s = values[0]
+    for v in values[1:]:
+        s = alpha * v + (1 - alpha) * s
+    return s
+
+def _rsi(values, period=14):
+    if len(values) < period + 1:
+        return 50.0
+    deltas = [values[i] - values[i-1] for i in range(1, len(values))]
+    up = sum(x for x in deltas[:period] if x > 0) / period
+    down = -sum(x for x in deltas[:period] if x < 0) / period
+    up_avg, down_avg = up, down
+    for d in deltas[period:]:
+        upval = max(d, 0.0)
+        downval = max(-d, 0.0)
+        up_avg = (up_avg * (period - 1) + upval) / period
+        down_avg = (down_avg * (period - 1) + downval) / period
+    if down_avg == 0:
+        return 100.0
+    rs = up_avg / down_avg
+    return 100 - (100 / (1 + rs))
+
+def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
+    url = "https://api.binance.com/api/v3/klines"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    closes = [float(k[4]) for k in data]
+    times  = [int(k[0]) for k in data]
+    return times, closes
+
+def predict_btc_price(hours_ahead=4):
+    try:
+        _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
+    except Exception as e:
+        return {"error": f"خطا در دریافت داده از بایننس: {e}"}
+
+    if len(closes) < 60:
+        return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
+
+    last_price = closes[-1]
+
+    rets = []
+    for i in range(1, len(closes)):
+        c0, c1 = closes[i-1], closes[i]
+        if c0 <= 0:
+            continue
+        rets.append(math.log(c1 / c0))
+    if not rets:
+        return {"error": "عدم امکان محاسبه بازده‌ها."}
+
+    window = min(200, len(rets))
+    r_win = rets[-window:]
+    mu = sum(r_win) / len(r_win)
+    mean_r = mu
+    var = sum((x - mean_r)**2 for x in r_win) / max(1, len(r_win) - 1)
+    sigma = math.sqrt(var)
+
+    lookback_prices = closes[-150:] if len(closes) >= 150 else closes
+    ema_fast = _ema(lookback_prices, 12)
+    ema_slow = _ema(lookback_prices, 26)
+    trend = (ema_fast - ema_slow) / ema_slow if ema_slow else 0.0
+    rsi_val = _rsi(closes, 14)
+
+    mu_adj = mu + 0.20 * trend
+    if rsi_val > 70:
+        mu_adj -= 0.25 * abs(mu)
+    elif rsi_val < 30:
+        mu_adj += 0.25 * abs(mu)
+
+    step_minutes = 5
+    n = int((hours_ahead * 60) / step_minutes)
+
+    log_S0 = math.log(last_price)
+    log_mean = log_S0 + n * mu_adj
+    log_std = math.sqrt(n) * sigma
+
+    point = math.exp(log_mean)
+    ci68 = (math.exp(log_mean - log_std), math.exp(log_mean + log_std))
+    ci95 = (math.exp(log_mean - 1.96 * log_std), math.exp(log_mean + 1.96 * log_std))
+
+    return {
+        "last": last_price,
+        "point": point,
+        "ci68": ci68,
+        "ci95": ci95,
+        "mu": mu,
+        "sigma": sigma,
+        "mu_adj": mu_adj,
+        "trend": trend,
+        "rsi": rsi_val,
+        "n": n
+    }
+
+def build_btc_forecast_text(hours=4):
+    res = predict_btc_price(hours)
+    if "error" in res:
+        return f"⚠️ {res['error']}"
+    last  = res["last"]
+    point = res["point"]
+    l68, u68 = res["ci68"]
+    l95, u95 = res["ci95"]
+    rsi_val = res["rsi"]
+    trend = res["trend"] * 100
+
+    return (
+        "🔮 *BTC 4h Forecast*\n"
+        f"⏱ افق: {hours} ساعت (۵ دقیقه‌ای × {res['n']})\n"
+        f"💵 قیمت فعلی: ${last:,.2f}\n"
+        f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
+        f"📏 بازه ۶۸٪: ${l68:,.2f} — ${u68:,.2f}\n"
+        f"📐 بازه ۹۵٪: ${l95:,.2f} — ${u95:,.2f}\n"
+        f"📈 مومنتوم EMA12-26: {trend:.2f}%\n"
+        f"🔄 RSI(14): {rsi_val:.1f}\n"
+        "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
+        "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
+    )
 
 # ================== منو ==================
 def send_interval_menu(chat_id):
@@ -231,6 +353,7 @@ def send_interval_menu(chat_id):
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
     markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
+    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC", callback_data="predict_btc_4h"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
@@ -248,6 +371,13 @@ def callback_top10(call):
     bot.answer_callback_query(call.id, "📊 گزارش ارسال شد")
     send_message(chat_id, report)
 
+@bot.callback_query_handler(func=lambda call: call.data == "predict_btc_4h")
+def callback_predict_btc_4h(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
+    text = build_btc_forecast_text(hours=4)
+    send_message(chat_id, text)
+
 # ================== دستورات ==================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -259,67 +389,5 @@ def start(message):
         "آدرس ولت‌هات رو بفرست تا برات مانیتور کنم.\n\n"
         "📍 /stop → توقف مانیتورینگ\n"
         "📍 /interval → تغییر بازه گزارش\n"
-        "📍 /top10 → گزارش ۱۰ ارز برتر"
-    )
-    send_interval_menu(chat_id)
-
-@bot.message_handler(commands=['interval'])
-def interval(message):
-    send_interval_menu(message.chat.id)
-
-@bot.message_handler(commands=['stop'])
-def stop(message):
-    chat_id = message.chat.id
-    if chat_id in user_wallets:
-        user_wallets.pop(chat_id, None)
-        keys_to_remove = [k for k in previous_positions if k[0] == chat_id]
-        for k in keys_to_remove:
-            previous_positions.pop(k, None)
-        send_message(chat_id, "🛑 مانیتورینگ متوقف شد.")
-    else:
-        send_message(chat_id, "⚠️ مانیتورینگی فعال نبود.")
-
-@bot.message_handler(commands=['top10'])
-def cmd_top10(message):
-    send_message(message.chat.id, get_top10_report())
-
-@bot.message_handler(func=lambda m: True)
-def add_wallet(message):
-    chat_id = message.chat.id
-    wallet = message.text.strip()
-    if not wallet:
-        return
-    user_wallets.setdefault(chat_id, [])
-    if wallet in user_wallets[chat_id]:
-        send_message(chat_id, f"⚠️ ولت `{wallet}` از قبل اضافه شده.")
-        return
-    user_wallets[chat_id].append(wallet)
-    previous_positions[(chat_id, wallet)] = get_positions(wallet)
-    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتور میشه.")
-
-# ================== اجرا ==================
-schedule.every(1).minutes.do(periodic_report)
-
-def run_scheduler():
-    while True:
-        check_positions()
-        schedule.run_pending()
-        time.sleep(2)
-
-threading.Thread(target=run_scheduler, daemon=True).start()
-
-# ---- اضافه کردن Flask برای Render ----
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "🤖 Bot is running!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
-threading.Thread(target=run_flask, daemon=True).start()
-
-# ---- اجرای ربات تلگرام ----
-bot.polling()
+        "📍 /top10 → گزارش ۱۰ ارز برتر\n"
+        "📍 /predict → پیش
