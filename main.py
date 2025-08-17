@@ -90,8 +90,7 @@ def _normalize_from_hyperliquid(raw):
         except Exception:
             continue
     return out
-
-
+    
 # ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
     headers = {"User-Agent": "Mozilla/5.0"}  
@@ -275,7 +274,6 @@ def _rsi(values, period=14):
 
 def _macd(values, fast=12, slow=26, signal=9):
     if len(values) < slow + signal:
-        # حداقل خروجی امن
         ema_fast = _ema(values, fast) if values else 0.0
         ema_slow = _ema(values, slow) if values else 1.0
         macd = ema_fast - ema_slow
@@ -284,7 +282,6 @@ def _macd(values, fast=12, slow=26, signal=9):
         return macd, signal_line, hist
     ema_fast_vals = []
     ema_slow_vals = []
-    # EMA تجمعی برای سرعت
     ef, es = values[0], values[0]
     af = 2 / (fast + 1.0)
     aslow = 2 / (slow + 1.0)
@@ -294,7 +291,6 @@ def _macd(values, fast=12, slow=26, signal=9):
         ema_fast_vals.append(ef)
         ema_slow_vals.append(es)
     macd_series = [a - b for a, b in zip(ema_fast_vals, ema_slow_vals)]
-    # سیگنال MACD
     s = macd_series[0]
     a_sig = 2 / (signal + 1.0)
     sig_series = []
@@ -384,7 +380,6 @@ def predict_btc_price(hours_ahead=4):
     trend = (ema_fast - ema_slow) / ema_slow if ema_slow else 0.0
 
     rsi_val = _rsi(closes, 14)
-
     macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
     bb_w, bb_up, bb_mid, bb_low = _bb_width(closes, 20, 2.0)
 
@@ -394,27 +389,19 @@ def predict_btc_price(hours_ahead=4):
     if short_sigma == 0:
         short_sigma = sigma
 
-    # 5) تعدیل میانگین و واریانس براساس اندیکاتورها (قوانین ملایم و پایدار)
+    # 5) تعدیل میانگین و واریانس براساس اندیکاتورها (بدون ML/On-chain)
     mu_adj = mu
-
-    # مومنتوم EMA (وزن کم برای پایداری)
-    mu_adj += 0.15 * trend
-
-    # MACD (جهت + قدرت)
-    if macd_hist > 0:
+    mu_adj += 0.15 * trend                     # مومنتوم
+    if macd_hist > 0:                           # جهت MACD
         mu_adj += 0.10 * abs(mu)
     elif macd_hist < 0:
         mu_adj -= 0.10 * abs(mu)
-
-    # RSI در نواحی اشباع (mean-reversion ملایم)
-    if rsi_val > 70:
+    if rsi_val > 70:                            # اشباع خرید/فروش
         mu_adj -= 0.20 * abs(mu)
     elif rsi_val < 30:
         mu_adj += 0.20 * abs(mu)
 
-    # واریانس پویا: ترکیب sigma بلندمدت با کوتاه‌مدت + عرض بولینگر
-    # اگر bb_w از میانه تاریخی بزرگ‌تر/کوچک‌تر باشد، روی sigma وزن می‌دهیم.
-    # (برای سادگی، میانه را برآورد ثابت 0.04 می‌گیریم؛ اگر داده کم باشد، پایدارتر است)
+    # واریانس پویا با بولینگر + کوتاه‌مدت
     median_bb_w = 0.04
     bb_scale = max(0.5, min(1.5, bb_w / median_bb_w if median_bb_w else 1.0))
     sigma_adj = 0.5 * sigma + 0.5 * short_sigma
@@ -468,8 +455,7 @@ def build_btc_forecast_text(hours=4):
     trend_pc = res["trend"] * 100
     source = res["source"]
 
-    # خلاصه به‌صورت جدول تک‌بلاک (برای Markdown تلگرام)
-    # ستون‌بندی با فاصله ثابت
+    # جدول جمع‌بندی برای Markdown تلگرام
     table = (
         "```\n"
         f"{'Metric':<18}{'Value':>18}\n"
@@ -492,6 +478,14 @@ def build_btc_forecast_text(hours=4):
         "```\n"
     )
 
+    # توضیح کوتاه درباره معنی بازه‌ها
+    ci_explain = (
+        "🔎 *معنی بازه‌ها:*\n"
+        "• **۶۸٪** یعنی با احتمال حدوداً ۶۸٪، قیمت در این بازه می‌ماند.\n"
+        "• **۹۵٪** یعنی با احتمال حدوداً ۹۵٪، قیمت از این بازه بیرون نمی‌زند.\n"
+        "این‌ها «بازه‌های اطمینان آماری» بر اساس نوسان اخیر بازار هستند و پیشنهاد معاملاتی نیستند.\n"
+    )
+
     return (
         "🔮 *BTC 4h Forecast (Enhanced)*\n"
         f"⏱ افق: {hours} ساعت ({res['n']} کندل، هر {res['step']} دقیقه)\n"
@@ -503,6 +497,7 @@ def build_btc_forecast_text(hours=4):
         f"📈 مومنتوم EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
         "🧠 تعدیل با MACD، باند بولینگر و ولتیلیتی کوتاه‌مدت انجام شده.\n\n"
         + table +
+        ci_explain +
         "⚙️ روش: GBM با μ/σ پویا (Momentum + MACD + RSI + BB)\n"
         "⚠️ *این یک سناریوی آماری است؛ توصیه معاملاتی محسوب نمی‌شود.*"
     )
@@ -520,7 +515,8 @@ def send_interval_menu(chat_id):
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
     markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
-    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC (Enhanced)", callback_data="predict_btc_4h"))
+    # برچسب را ساده نگه می‌داریم تا ساختار دست نخورَد؛ callback همانی است
+    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC", callback_data="predict_btc_4h"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 
