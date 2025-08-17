@@ -161,7 +161,7 @@ def check_positions():
                     send_message(chat_id, msg)
 
             previous_positions[(chat_id, wallet)] = current_positions
-
+            
 def periodic_report():
     for chat_id, wallets in user_wallets.items():
         interval = user_intervals.get(chat_id, 1)
@@ -263,7 +263,6 @@ def predict_btc_price(hours_ahead=4):
         return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
 
     last_price = closes[-1]
-
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
@@ -326,7 +325,6 @@ def build_btc_forecast_text(hours=4):
     l95, u95 = res["ci95"]
     rsi_val = res["rsi"]
     trend = res["trend"] * 100
-
     return (
         "🔮 *BTC 4h Forecast*\n"
         f"⏱ افق: {hours} ساعت (۵ دقیقه‌ای × {res['n']})\n"
@@ -339,8 +337,7 @@ def build_btc_forecast_text(hours=4):
         "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
         "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
     )
-
-# ================== منو ==================
+    # ================== منو ==================
 def send_interval_menu(chat_id):
     markup = InlineKeyboardMarkup()
     options = [
@@ -390,5 +387,57 @@ def start(message):
         "📍 /stop → توقف مانیتورینگ\n"
         "📍 /interval → تغییر بازه گزارش\n"
         "📍 /top10 → گزارش ۱۰ ارز برتر\n"
-        "📍 /predict → پیش\n"
-                )
+        "📍 /predict → پیش‌بینی ۴ساعته BTC\n"
+    )
+
+@bot.message_handler(commands=['stop'])
+def stop(message):
+    chat_id = message.chat.id
+    user_wallets.pop(chat_id, None)
+    user_intervals.pop(chat_id, None)
+    send_message(chat_id, "⏹ مانیتورینگ متوقف شد.")
+
+@bot.message_handler(commands=['interval'])
+def interval(message):
+    chat_id = message.chat.id
+    send_interval_menu(chat_id)
+
+@bot.message_handler(commands=['top10'])
+def top10(message):
+    chat_id = message.chat.id
+    report = get_top10_report()
+    send_message(chat_id, report)
+
+@bot.message_handler(commands=['predict'])
+def predict(message):
+    chat_id = message.chat.id
+    text = build_btc_forecast_text(hours=4)
+    send_message(chat_id, text)
+
+# ثبت ولت‌ها
+@bot.message_handler(func=lambda m: True)
+def add_wallet(message):
+    chat_id = message.chat.id
+    wallet = message.text.strip()
+    if not wallet:
+        return
+    wallets = user_wallets.setdefault(chat_id, [])
+    if wallet not in wallets:
+        wallets.append(wallet)
+        send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
+    else:
+        send_message(chat_id, f"ℹ️ ولت `{wallet}` قبلاً اضافه شده بود.")
+
+# ================== زمان‌بندی ==================
+def run_scheduler():
+    schedule.every(1).minutes.do(check_positions)
+    schedule.every(1).minutes.do(periodic_report)
+    while True:
+        schedule.run_pending()
+        time.sleep(5)
+
+t = threading.Thread(target=run_scheduler, daemon=True)
+t.start()
+
+print("🤖 Bot is running...")
+bot.infinity_polling()
