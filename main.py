@@ -233,6 +233,18 @@ def get_top10_report():
         return f"⚠️ خطا در دریافت گزارش: {e}"
         
 # ================== پیش‌بینی BTC ==================
+def _fetch_kraken_closes(pair="XBTUSDT", interval=60):
+    url = "https://api.kraken.com/0/public/OHLC"
+    params = {"pair": pair, "interval": interval}
+    r = requests.get(url, params=params, timeout=10, headers=HEADERS)
+    r.raise_for_status()
+    data = r.json()
+    key = [k for k in data["result"].keys() if k != "last"][0]
+    ohlc = data["result"][key]
+    closes = [float(c[4]) for c in ohlc]
+    times = [int(c[0]) for c in ohlc]
+    return times, closes
+
 def predict_btc_price(hours_ahead=4):
     # Binance → Kraken fallback
     use_step = 5
