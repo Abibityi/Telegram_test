@@ -16,7 +16,6 @@ if not API_TOKEN:
 bot = telebot.TeleBot(API_TOKEN)
 
 # برای هر کاربر یک لیست ولت ذخیره می‌کنیم
-
 user_wallets = {}
 previous_positions = {}   # کلید: (chat_id, wallet)
 user_intervals = {}
@@ -35,7 +34,6 @@ def _sign_fmt(x):
         return f"✅ +{v:,.2f}"
     else:
         return f"🔴 {v:,.2f}"
-
 # ---------- نرمال‌سازی داده‌های HyperDash ----------
 
 def _normalize_from_hyperdash(raw):
@@ -66,6 +64,7 @@ def _normalize_from_hyperdash(raw):
             })
     return out
 
+
 # ---------- نرمال‌سازی داده‌های Hyperliquid ----------
 
 def _normalize_from_hyperliquid(raw):
@@ -94,6 +93,10 @@ def _normalize_from_hyperliquid(raw):
         except Exception:
             continue
     return out
+
+
+# ---------- گرفتن پوزیشن‌ها از HyperDash یا Hyperliquid ----------
+
 def get_positions(wallet):
     try:
         url = f"https://hyperdash.info/api/v1/trader/{wallet}/positions"
@@ -115,7 +118,7 @@ def get_positions(wallet):
         print(f"[Hyperliquid] error for {wallet}: {e}")
 
     return []
-
+ 
 # ---------- فرمت پیام ----------
 
 def format_position_line(p):
@@ -129,10 +132,15 @@ def format_position_line(p):
     lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
     return "\n".join(lines)
 
-def send_message(chat_id, text):
-    bot.send_message(chat_id, text, parse_mode="Markdown")
 
-# ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
+def send_message(chat_id, text):
+    try:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[Telegram Send Error] {e}")
+
+
+# ================== مانیتورینگ لحظه‌ای ==================
 
 def check_positions():
     for chat_id, wallets in user_wallets.items():
@@ -172,6 +180,8 @@ def check_positions():
             previous_positions[(chat_id, wallet)] = current_positions
 
 
+# ================== گزارش دوره‌ای ==================
+
 def periodic_report():
     for chat_id, wallets in user_wallets.items():
         interval = user_intervals.get(chat_id, 1)
@@ -187,8 +197,8 @@ def periodic_report():
                 send_message(chat_id, f"{header}\n{body}")
             else:
                 send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
-
-# ================== گزارش ۱۰ ارز برتر ==================
+ 
+ # ================== گزارش ۱۰ ارز برتر ==================
 
 def get_top10_report():
     try:
@@ -206,7 +216,7 @@ def get_top10_report():
 
             bin_long, bin_short = "-", "-"
             try:
-                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
+                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol}USDT&period=5m&limit=1"
                 b_res = requests.get(b_url, timeout=8)
                 if b_res.status_code == 200:
                     data = b_res.json()
@@ -226,9 +236,9 @@ def get_top10_report():
         return "📊 *Top 10 Coins by Market Cap*\n\n" + "\n".join(lines)
 
     except Exception as e:
+        print(f"[Top10 Report Error] {e}")
         return f"⚠️ خطا در دریافت گزارش: {e}"
-
-
+   
 # ================== پیش‌بینی ۴ساعته BTC ==================
 
 def _ema(values, span):
@@ -278,14 +288,20 @@ def _fetch_coingecko_closes(symbol="bitcoin", interval="hourly", days=7):
     closes = [float(p[1]) for p in data["prices"]]
     times  = [int(p[0]) for p in data["prices"]]
     return times, closes
+
+
 def predict_btc_price(hours_ahead=4):
     try:
         _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
         source = "Binance (5m)"
     except Exception as e:
         print(f"[Binance Error] {e} → fallback به CoinGecko")
-        _, closes = _fetch_coingecko_closes("bitcoin", "hourly", 7)
-        source = "CoinGecko (1h)"
+        try:
+            _, closes = _fetch_coingecko_closes("bitcoin", "hourly", 7)
+            source = "CoinGecko (1h)"
+        except Exception as e2:
+            print(f"[CoinGecko Error] {e2}")
+            return {"error": "❌ دریافت داده از هیچ منبعی ممکن نشد."}
 
     if len(closes) < 60:
         return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
@@ -373,7 +389,7 @@ def build_btc_forecast_text(hours=4):
         "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
         "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
     )
-    
+
 # ================== منو ==================
 
 def send_interval_menu(chat_id):
@@ -415,8 +431,7 @@ def callback_predict_btc_4h(call):
     bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
     text = build_btc_forecast_text(hours=4)
     send_message(chat_id, text)
-
-
+    
 # ================== دستورات ==================
 
 @bot.message_handler(commands=['start'])
@@ -471,8 +486,8 @@ def add_wallet(message):
         return
     user_wallets.setdefault(chat_id, []).append(wallet)
     send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-
-
+    
+    
 # ================== اجرای زمان‌بندی ==================
 
 def run_scheduler():
