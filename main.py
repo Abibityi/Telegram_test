@@ -1,5 +1,5 @@
 
-
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 import time
 import schedule
 import telebot
@@ -14,14 +14,6 @@ API_TOKEN = os.environ.get("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("❌ API_TOKEN در متغیرهای محیطی تنظیم نشده")
 
-COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
-if not COINGECKO_API_KEY:
-    raise SystemExit("❌ COINGECKO_API_KEY در متغیرهای محیطی تنظیم نشده")
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "x-cg-pro-api-key": COINGECKO_API_KEY
-}
 
 bot = telebot.TeleBot(API_TOKEN)
 
