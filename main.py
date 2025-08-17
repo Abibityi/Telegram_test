@@ -1,3 +1,4 @@
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 import time
 import schedule
 import telebot
@@ -8,7 +9,6 @@ import math
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
-
 API_TOKEN = os.environ.get("API_TOKEN")
 if not API_TOKEN:
     raise SystemExit("❌ API_TOKEN در متغیرهای محیطی تنظیم نشده")
@@ -21,7 +21,6 @@ previous_positions = {}   # کلید: (chat_id, wallet)
 user_intervals = {}
 
 # ---------- ابزارهای کمکی ----------
-
 def _safe_float(x, default=0.0):
     try:
         return float(x)
@@ -34,9 +33,8 @@ def _sign_fmt(x):
         return f"✅ +{v:,.2f}"
     else:
         return f"🔴 {v:,.2f}"
-
-# ---------- نرمال‌سازی داده‌های HyperDash ----------
-
+        
+ # ---------- نرمال‌سازی داده‌های HyperDash ----------
 def _normalize_from_hyperdash(raw):
     out = []
     items = raw if isinstance(raw, list) else []
@@ -65,8 +63,8 @@ def _normalize_from_hyperdash(raw):
             })
     return out
 
-# ---------- نرمال‌سازی داده‌های Hyperliquid ----------
 
+# ---------- نرمال‌سازی داده‌های Hyperliquid ----------
 def _normalize_from_hyperliquid(raw):
     out = []
     items = raw.get("assetPositions", []) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
@@ -94,8 +92,11 @@ def _normalize_from_hyperliquid(raw):
             continue
     return out
 
+
+# ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0"}  # جلوگیری از بلاک شدن
+
     try:
         url = f"https://hyperdash.info/api/v1/trader/{wallet}/positions"
         r = requests.get(url, headers=headers, timeout=10)
@@ -116,11 +117,157 @@ def get_positions(wallet):
         print(f"[Hyperliquid] error for {wallet}: {e}")
 
     return []
+    
+# ---------- فرمت پیام ----------
+def format_position_line(p):
+    lines = [
+        f"🪙 *{p.get('pair','?')}* | {('🟢 LONG' if p.get('side')=='LONG' else '🔴 SHORT')}",
+        f"🔢 Size: {p.get('size','?')}",
+        f"🎯 Entry: {p.get('entryPrice','?')}",
+    ]
+    if p.get("markPrice") is not None:
+        lines.append(f"📍 Mark: {p.get('markPrice')}")
+    lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
+    return "\n".join(lines)
+
+
+def send_message(chat_id, text):
+    try:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[SendMessage Error] {e}")
+
+
+# ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
+def check_positions():
+    for chat_id, wallets in user_wallets.items():
+        for wallet in wallets:
+            current_positions = get_positions(wallet)
+            prev_positions = previous_positions.get((chat_id, wallet), [])
+
+            current_map = {p["uid"]: p for p in current_positions}
+            prev_map    = {p["uid"]: p for p in prev_positions}
+
+            # پوزیشن جدید
+            for uid, pos in current_map.items():
+                if uid not in prev_map:
+                    msg = (
+                        "🚀 *Position Opened*\n"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
+                        f"{format_position_line(pos)}"
+                    )
+                    send_message(chat_id, msg)
+
+            # پوزیشن بسته
+            for uid, pos in prev_map.items():
+                if uid not in current_map:
+                    msg = (
+                        "✅ *Position Closed*\n"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
+                        f"🪙 *{pos.get('pair','?')}* | "
+                        f"{('🟢 LONG' if pos.get('side')=='LONG' else '🔴 SHORT')}\n"
+                        f"🔢 Size: {pos.get('size')}\n"
+                        f"🎯 Entry: {pos.get('entryPrice')}\n"
+                        f"💵 Final PNL: {_sign_fmt(pos.get('unrealizedPnl',0))}\n"
+                        "🔚 پوزیشن بسته شد."
+                    )
+                    send_message(chat_id, msg)
+
+            previous_positions[(chat_id, wallet)] = current_positions
+
+
+def periodic_report():
+    for chat_id, wallets in user_wallets.items():
+        interval = user_intervals.get(chat_id, 1)
+        now_minute = int(time.time() / 60)
+        if now_minute % interval != 0:
+            continue
+
+        for wallet in wallets:
+            current_positions = get_positions(wallet)
+            header = f"🕒 *Periodic Report ({interval} min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
+            if current_positions:
+                body = "\n\n".join([format_position_line(p) for p in current_positions])
+                send_message(chat_id, f"{header}\n{body}")
+            else:
+                send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
+                
+                
+# ================== گزارش ۱۰ ارز برتر ==================
+def get_top10_report():
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
+        r = requests.get(url, params=params, timeout=10, headers=HEADERS)
+        r.raise_for_status()
+        coins = r.json()
+
+        lines = []
+        for c in coins:
+            symbol = c.get("symbol", "").upper()
+            price = c.get("current_price", 0)
+            change = c.get("price_change_percentage_24h", 0)
+
+            bin_long, bin_short = "-", "-"
+            try:
+                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
+                b_res = requests.get(b_url, timeout=8, headers=HEADERS)
+                if b_res.status_code == 200:
+                    data = b_res.json()
+                    if data:
+                        bin_long = f"{float(data[0]['longAccount'])*100:.1f}%"
+                        bin_short = f"{float(data[0]['shortAccount'])*100:.1f}%"
+            except Exception as e:
+                print(f"[Binance] error for {symbol}: {e}")
+
+            lines.append(
+                f"🪙 *{symbol}*\n"
+                f"💵 ${price:,.2f} ({change:+.2f}%)\n"
+                f"📊 Binance: 🟢 {bin_long} | 🔴 {bin_short}\n"
+                "━━━━━━━━━━"
+            )
+
+        return "📊 *Top 10 Coins by Market Cap*\n\n" + "\n".join(lines)
+
+    except Exception as e:
+        return f"⚠️ خطا در دریافت گزارش: {e}"
+
+
+# ================== پیش‌بینی ۴ساعته BTC ==================
+
+def _ema(values, span):
+    if not values:
+        return 0.0
+    alpha = 2 / (span + 1.0)
+    s = values[0]
+    for v in values[1:]:
+        s = alpha * v + (1 - alpha) * s
+    return s
+
+def _rsi(values, period=14):
+    if len(values) < period + 1:
+        return 50.0
+    deltas = [values[i] - values[i-1] for i in range(1, len(values))]
+    up = sum(x for x in deltas[:period] if x > 0) / period
+    down = -sum(x for x in deltas[:period] if x < 0) / period
+    up_avg, down_avg = up, down
+    for d in deltas[period:]:
+        upval = max(d, 0.0)
+        downval = max(-d, 0.0)
+        up_avg = (up_avg * (period - 1) + upval) / period
+        down_avg = (down_avg * (period - 1) + downval) / period
+    if down_avg == 0:
+        return 100.0
+    rs = up_avg / down_avg
+    return 100 - (100 / (1 + rs))
+
+
 def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, params=params, headers=headers, timeout=10)
+    r = requests.get(url, params=params, timeout=10, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
     closes = [float(k[4]) for k in data]
@@ -131,31 +278,22 @@ def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
 def _fetch_coingecko_closes(symbol="bitcoin", interval="hourly", days=7):
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart"
     params = {"vs_currency": "usd", "days": days, "interval": interval}
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, params=params, headers=headers, timeout=10)
+    r = requests.get(url, params=params, timeout=10, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
     closes = [float(p[1]) for p in data["prices"]]
     times  = [int(p[0]) for p in data["prices"]]
     return times, closes
-def predict_btc_price(hours_ahead=4):
-    closes, source = None, None
 
-    # --- Binance ---
+
+def predict_btc_price(hours_ahead=4):
     try:
         _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
         source = "Binance (5m)"
     except Exception as e:
-        print(f"[Binance Error] {e} → تلاش برای CoinGecko")
-
-    # --- CoinGecko ---
-    if not closes:
-        try:
-            _, closes = _fetch_coingecko_closes("bitcoin", "hourly", 7)
-            source = "CoinGecko (1h)"
-        except Exception as e:
-            print(f"[CoinGecko Error] {e}")
-            return {"error": "هیچ داده‌ای از Binance یا CoinGecko دریافت نشد."}
+        print(f"[Binance Error] {e} → fallback به CoinGecko")
+        _, closes = _fetch_coingecko_closes("bitcoin", "hourly", 7)
+        source = "CoinGecko (1h)"
 
     if len(closes) < 60:
         return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
@@ -175,8 +313,7 @@ def predict_btc_price(hours_ahead=4):
     window = min(200, len(rets))
     r_win = rets[-window:]
     mu = sum(r_win) / len(r_win)
-    mean_r = mu
-    var = sum((x - mean_r)**2 for x in r_win) / max(1, len(r_win) - 1)
+    var = sum((x - mu)**2 for x in r_win) / max(1, len(r_win) - 1)
     sigma = math.sqrt(var)
 
     lookback_prices = closes[-150:] if len(closes) >= 150 else closes
@@ -215,6 +352,8 @@ def predict_btc_price(hours_ahead=4):
         "n": n,
         "source": source
     }
+
+
 def build_btc_forecast_text(hours=4):
     res = predict_btc_price(hours)
     if "error" in res:
@@ -239,11 +378,10 @@ def build_btc_forecast_text(hours=4):
         f"📈 مومنتوم EMA12-26: {trend:.2f}%\n"
         f"🔄 RSI(14): {rsi_val:.1f}\n"
         "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
-        "⚠️ *این صرفاً یک پیش‌بینی آماری است و سیگنال خرید/فروش نیست.*"
+        "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
     )
     
 # ================== منو ==================
-
 def send_interval_menu(chat_id):
     markup = InlineKeyboardMarkup()
     options = [
@@ -283,9 +421,9 @@ def callback_predict_btc_4h(call):
     bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
     text = build_btc_forecast_text(hours=4)
     send_message(chat_id, text)
-  
-# ================== دستورات ==================
 
+
+# ================== دستورات ==================
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -338,6 +476,7 @@ def add_wallet(message):
         return
     user_wallets.setdefault(chat_id, []).append(wallet)
     send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
+    
     
 # ================== اجرای زمان‌بندی ==================
 
