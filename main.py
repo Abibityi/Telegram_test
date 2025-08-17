@@ -1,4 +1,4 @@
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 
 import time
 import schedule
