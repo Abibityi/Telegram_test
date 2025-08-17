@@ -192,8 +192,7 @@ def periodic_report():
                 send_message(chat_id, f"{header}\n{body}")
             else:
                 send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
-
-
+                
 # ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
@@ -233,7 +232,7 @@ def get_top10_report():
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
         
-# ================== پیش‌بینی ۴ساعته BTC ==================
+# ================== پیش‌بینی ۴ساعته BTC (بهبود دقت) ==================
 
 def _ema(values, span):
     if not values:
@@ -243,6 +242,19 @@ def _ema(values, span):
     for v in values[1:]:
         s = alpha * v + (1 - alpha) * s
     return s
+
+def _sma(values, window):
+    if len(values) < window or window <= 0:
+        return sum(values) / max(1, len(values))
+    return sum(values[-window:]) / window
+
+def _std(values, window):
+    if len(values) < window or window <= 1:
+        return 0.0
+    sub = values[-window:]
+    m = sum(sub) / window
+    var = sum((x - m) ** 2 for x in sub) / (window - 1)
+    return math.sqrt(var)
 
 def _rsi(values, period=14):
     if len(values) < period + 1:
@@ -261,6 +273,48 @@ def _rsi(values, period=14):
     rs = up_avg / down_avg
     return 100 - (100 / (1 + rs))
 
+def _macd(values, fast=12, slow=26, signal=9):
+    if len(values) < slow + signal:
+        # حداقل خروجی امن
+        ema_fast = _ema(values, fast) if values else 0.0
+        ema_slow = _ema(values, slow) if values else 1.0
+        macd = ema_fast - ema_slow
+        signal_line = 0.0
+        hist = macd - signal_line
+        return macd, signal_line, hist
+    ema_fast_vals = []
+    ema_slow_vals = []
+    # EMA تجمعی برای سرعت
+    ef, es = values[0], values[0]
+    af = 2 / (fast + 1.0)
+    aslow = 2 / (slow + 1.0)
+    for v in values:
+        ef = af * v + (1 - af) * ef
+        es = aslow * v + (1 - aslow) * es
+        ema_fast_vals.append(ef)
+        ema_slow_vals.append(es)
+    macd_series = [a - b for a, b in zip(ema_fast_vals, ema_slow_vals)]
+    # سیگنال MACD
+    s = macd_series[0]
+    a_sig = 2 / (signal + 1.0)
+    sig_series = []
+    for v in macd_series:
+        s = a_sig * v + (1 - a_sig) * s
+        sig_series.append(s)
+    macd = macd_series[-1]
+    signal_line = sig_series[-1]
+    hist = macd - signal_line
+    return macd, signal_line, hist
+
+def _bb_width(values, window=20, k=2.0):
+    if len(values) < window:
+        return 0.0, 0.0, 0.0, 0.0
+    m = _sma(values, window)
+    sd = _std(values, window)
+    upper = m + k * sd
+    lower = m - k * sd
+    width = (upper - lower) / m if m else 0.0
+    return width, upper, m, lower
 
 def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     url = "https://api.binance.com/api/v3/klines"
@@ -272,77 +326,107 @@ def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     times  = [int(k[0]) for k in data]
     return times, closes
 
-
 def _fetch_kraken_closes(pair="XBTUSDT", interval=60):
     """
     interval بر حسب دقیقه است (Kraken: 1,5,15,30,60,240,...)
-    برای fallback از 60 (ساعتی) استفاده می‌کنیم.
+    در fallback از 60 (ساعتی) استفاده می‌شود.
     """
     url = "https://api.kraken.com/0/public/OHLC"
     params = {"pair": pair, "interval": interval}
     r = requests.get(url, params=params, timeout=10, headers=HEADERS)
     r.raise_for_status()
     data = r.json()
-    # کلید جفت در result نام نرمال‌سازی شده است؛ اولین کلید را برمی‌داریم
     key = [k for k in data["result"].keys() if k != "last"][0]
     ohlc = data["result"][key]
     closes = [float(c[4]) for c in ohlc]
     times = [int(c[0]) for c in ohlc]
     return times, closes
 
-
 def predict_btc_price(hours_ahead=4):
+    # 1) داده‌ها: Binance → Kraken (fallback)
+    use_step = 5  # دقیقه/کندل
     try:
         _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
         source = "Binance (5m)"
+        use_step = 5
     except Exception as e:
         print(f"[Binance Error] {e} → fallback به Kraken")
-        # روی Kraken نماد BTC = XBT است
         _, closes = _fetch_kraken_closes("XBTUSDT", interval=60)
         source = "Kraken (1h)"
+        use_step = 60
 
     if len(closes) < 60:
         return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
 
     last_price = closes[-1]
 
-    # محاسبه بازده لگاریتمی
+    # 2) بازده لگاریتمی
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
         if c0 <= 0:
             continue
         rets.append(math.log(c1 / c0))
-
     if not rets:
         return {"error": "عدم امکان محاسبه بازده‌ها."}
 
+    # 3) برآورد پایه (mu, sigma)
     window = min(200, len(rets))
     r_win = rets[-window:]
     mu = sum(r_win) / len(r_win)
     var = sum((x - mu)**2 for x in r_win) / max(1, len(r_win) - 1)
     sigma = math.sqrt(var)
 
+    # 4) اندیکاتورها: EMA مومنتوم، RSI، MACD، باندهای بولینگر، ولتیلیتی اخیر
     lookback_prices = closes[-150:] if len(closes) >= 150 else closes
     ema_fast = _ema(lookback_prices, 12)
     ema_slow = _ema(lookback_prices, 26)
     trend = (ema_fast - ema_slow) / ema_slow if ema_slow else 0.0
+
     rsi_val = _rsi(closes, 14)
 
-    mu_adj = mu + 0.20 * trend
+    macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
+    bb_w, bb_up, bb_mid, bb_low = _bb_width(closes, 20, 2.0)
+
+    # ولتیلیتی کوتاه‌مدت (ریشه واریانس ۳۰ بازده اخیر)
+    short_win = min(30, len(r_win))
+    short_sigma = _std(r_win, short_win) if short_win >= 2 else sigma
+    if short_sigma == 0:
+        short_sigma = sigma
+
+    # 5) تعدیل میانگین و واریانس براساس اندیکاتورها (قوانین ملایم و پایدار)
+    mu_adj = mu
+
+    # مومنتوم EMA (وزن کم برای پایداری)
+    mu_adj += 0.15 * trend
+
+    # MACD (جهت + قدرت)
+    if macd_hist > 0:
+        mu_adj += 0.10 * abs(mu)
+    elif macd_hist < 0:
+        mu_adj -= 0.10 * abs(mu)
+
+    # RSI در نواحی اشباع (mean-reversion ملایم)
     if rsi_val > 70:
-        mu_adj -= 0.25 * abs(mu)
+        mu_adj -= 0.20 * abs(mu)
     elif rsi_val < 30:
-        mu_adj += 0.25 * abs(mu)
+        mu_adj += 0.20 * abs(mu)
 
-    # اگر منبع Binance باشد، گام 5 دقیقه‌ای درست است؛
-    # اگر Kraken باشد (1h)، هنوز از همان تعداد n با فرض 5m استفاده می‌کنیم تا ساختار کد ثابت بماند.
-    step_minutes = 5
-    n = int((hours_ahead * 60) / step_minutes)
+    # واریانس پویا: ترکیب sigma بلندمدت با کوتاه‌مدت + عرض بولینگر
+    # اگر bb_w از میانه تاریخی بزرگ‌تر/کوچک‌تر باشد، روی sigma وزن می‌دهیم.
+    # (برای سادگی، میانه را برآورد ثابت 0.04 می‌گیریم؛ اگر داده کم باشد، پایدارتر است)
+    median_bb_w = 0.04
+    bb_scale = max(0.5, min(1.5, bb_w / median_bb_w if median_bb_w else 1.0))
+    sigma_adj = 0.5 * sigma + 0.5 * short_sigma
+    sigma_adj *= bb_scale
 
+    # 6) تبدیل افق زمانی به تعداد قدم‌ها
+    n = max(1, int((hours_ahead * 60) / use_step))
+
+    # 7) پروسه GBM با پارامترهای تعدیل‌شده
     log_S0 = math.log(last_price)
     log_mean = log_S0 + n * mu_adj
-    log_std = math.sqrt(n) * sigma
+    log_std = math.sqrt(n) * sigma_adj
 
     point = math.exp(log_mean)
     ci68 = (math.exp(log_mean - log_std), math.exp(log_mean + log_std))
@@ -356,12 +440,20 @@ def predict_btc_price(hours_ahead=4):
         "mu": mu,
         "sigma": sigma,
         "mu_adj": mu_adj,
+        "sigma_adj": sigma_adj,
         "trend": trend,
         "rsi": rsi_val,
+        "macd": macd,
+        "macd_sig": macd_sig,
+        "macd_hist": macd_hist,
+        "bb_width": bb_w,
+        "bb_up": bb_up,
+        "bb_mid": bb_mid,
+        "bb_low": bb_low,
         "n": n,
+        "step": use_step,
         "source": source
     }
-
 
 def build_btc_forecast_text(hours=4):
     res = predict_btc_price(hours)
@@ -373,21 +465,46 @@ def build_btc_forecast_text(hours=4):
     l68, u68 = res["ci68"]
     l95, u95 = res["ci95"]
     rsi_val = res["rsi"]
-    trend = res["trend"] * 100
+    trend_pc = res["trend"] * 100
     source = res["source"]
 
+    # خلاصه به‌صورت جدول تک‌بلاک (برای Markdown تلگرام)
+    # ستون‌بندی با فاصله ثابت
+    table = (
+        "```\n"
+        f"{'Metric':<18}{'Value':>18}\n"
+        f"{'-'*36}\n"
+        f"{'Source':<18}{source:>18}\n"
+        f"{'Step (min)':<18}{res['step']:>18}\n"
+        f"{'Candles (n)':<18}{res['n']:>18}\n"
+        f"{'Price (now)':<18}${last:>17,.2f}\n"
+        f"{'Forecast':<18}${point:>17,.2f}\n"
+        f"{'CI 68% Low':<18}${l68:>17,.2f}\n"
+        f"{'CI 68% High':<18}${u68:>17,.2f}\n"
+        f"{'CI 95% Low':<18}${l95:>17,.2f}\n"
+        f"{'CI 95% High':<18}${u95:>17,.2f}\n"
+        f"{'EMA Momentum':<18}{trend_pc:>17.2f}%\n"
+        f"{'RSI(14)':<18}{rsi_val:>18.1f}\n"
+        f"{'MACD Hist':<18}{res['macd_hist']:>18.6f}\n"
+        f"{'BB Width':<18}{res['bb_width']:>18.4f}\n"
+        f"{'sigma (orig)':<18}{res['sigma']:>18.6f}\n"
+        f"{'sigma (adj)':<18}{res['sigma_adj']:>18.6f}\n"
+        "```\n"
+    )
+
     return (
-        "🔮 *BTC 4h Forecast*\n"
-        f"⏱ افق: {hours} ساعت ({res['n']} کندل)\n"
+        "🔮 *BTC 4h Forecast (Enhanced)*\n"
+        f"⏱ افق: {hours} ساعت ({res['n']} کندل، هر {res['step']} دقیقه)\n"
         f"📊 منبع داده: {source}\n"
         f"💵 قیمت فعلی: ${last:,.2f}\n"
         f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
         f"📏 بازه ۶۸٪: ${l68:,.2f} — ${u68:,.2f}\n"
         f"📐 بازه ۹۵٪: ${l95:,.2f} — ${u95:,.2f}\n"
-        f"📈 مومنتوم EMA12-26: {trend:.2f}%\n"
-        f"🔄 RSI(14): {rsi_val:.1f}\n"
-        "⚙️ روش: بازده لگاریتمی + واریانس (GBM) با تعدیل مومنتوم/RSI\n"
-        "⚠️ *این صرفاً یک پیش‌بینی آماری است و به هیچ وجه پیشنهاد خرید یا فروش نیست.*"
+        f"📈 مومنتوم EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
+        "🧠 تعدیل با MACD، باند بولینگر و ولتیلیتی کوتاه‌مدت انجام شده.\n\n"
+        + table +
+        "⚙️ روش: GBM با μ/σ پویا (Momentum + MACD + RSI + BB)\n"
+        "⚠️ *این یک سناریوی آماری است؛ توصیه معاملاتی محسوب نمی‌شود.*"
     )
     
 # ================== منو ==================
@@ -403,7 +520,7 @@ def send_interval_menu(chat_id):
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
     markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
-    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC", callback_data="predict_btc_4h"))
+    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC (Enhanced)", callback_data="predict_btc_4h"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 
