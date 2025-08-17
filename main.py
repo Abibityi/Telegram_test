@@ -6,6 +6,8 @@ import threading
 import requests
 import os
 import math
+import matplotlib.pyplot as plt
+import io
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
@@ -32,7 +34,7 @@ def _sign_fmt(x):
         return f"✅ +{v:,.2f}"
     else:
         return f"🔴 {v:,.2f}"
-        
+      
 # ---------- نرمال‌سازی داده‌های HyperDash ----------
 def _normalize_from_hyperdash(raw):
     out = []
@@ -62,7 +64,6 @@ def _normalize_from_hyperdash(raw):
             })
     return out
 
-
 # ---------- نرمال‌سازی داده‌های Hyperliquid ----------
 def _normalize_from_hyperliquid(raw):
     out = []
@@ -90,7 +91,7 @@ def _normalize_from_hyperliquid(raw):
         except Exception:
             continue
     return out
-    
+
 # ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
     headers = {"User-Agent": "Mozilla/5.0"}  
@@ -231,7 +232,9 @@ def get_top10_report():
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
         
-# ================== پیش‌بینی ۴ساعته BTC (بهبود دقت) ==================
+# ================== پیش‌بینی ۴ساعته BTC (بهبود دقت + نمودار) ==================
+import matplotlib.pyplot as plt
+import io
 
 def _ema(values, span):
     if not values:
@@ -274,12 +277,7 @@ def _rsi(values, period=14):
 
 def _macd(values, fast=12, slow=26, signal=9):
     if len(values) < slow + signal:
-        ema_fast = _ema(values, fast) if values else 0.0
-        ema_slow = _ema(values, slow) if values else 1.0
-        macd = ema_fast - ema_slow
-        signal_line = 0.0
-        hist = macd - signal_line
-        return macd, signal_line, hist
+        return 0.0, 0.0, 0.0
     ema_fast_vals = []
     ema_slow_vals = []
     ef, es = values[0], values[0]
@@ -323,10 +321,6 @@ def _fetch_binance_closes(symbol="BTCUSDT", interval="5m", limit=500):
     return times, closes
 
 def _fetch_kraken_closes(pair="XBTUSDT", interval=60):
-    """
-    interval بر حسب دقیقه است (Kraken: 1,5,15,30,60,240,...)
-    در fallback از 60 (ساعتی) استفاده می‌شود.
-    """
     url = "https://api.kraken.com/0/public/OHLC"
     params = {"pair": pair, "interval": interval}
     r = requests.get(url, params=params, timeout=10, headers=HEADERS)
@@ -339,8 +333,8 @@ def _fetch_kraken_closes(pair="XBTUSDT", interval=60):
     return times, closes
 
 def predict_btc_price(hours_ahead=4):
-    # 1) داده‌ها: Binance → Kraken (fallback)
-    use_step = 5  # دقیقه/کندل
+    # Binance → Kraken fallback
+    use_step = 5
     try:
         _, closes = _fetch_binance_closes("BTCUSDT", "5m", 500)
         source = "Binance (5m)"
@@ -356,7 +350,7 @@ def predict_btc_price(hours_ahead=4):
 
     last_price = closes[-1]
 
-    # 2) بازده لگاریتمی
+    # بازده لگاریتمی
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
@@ -366,51 +360,44 @@ def predict_btc_price(hours_ahead=4):
     if not rets:
         return {"error": "عدم امکان محاسبه بازده‌ها."}
 
-    # 3) برآورد پایه (mu, sigma)
+    # mu و sigma
     window = min(200, len(rets))
     r_win = rets[-window:]
     mu = sum(r_win) / len(r_win)
     var = sum((x - mu)**2 for x in r_win) / max(1, len(r_win) - 1)
     sigma = math.sqrt(var)
 
-    # 4) اندیکاتورها: EMA مومنتوم، RSI، MACD، باندهای بولینگر، ولتیلیتی اخیر
-    lookback_prices = closes[-150:] if len(closes) >= 150 else closes
-    ema_fast = _ema(lookback_prices, 12)
-    ema_slow = _ema(lookback_prices, 26)
+    # اندیکاتورها
+    ema_fast = _ema(closes, 12)
+    ema_slow = _ema(closes, 26)
     trend = (ema_fast - ema_slow) / ema_slow if ema_slow else 0.0
-
     rsi_val = _rsi(closes, 14)
-    macd, macd_sig, macd_hist = _macd(closes, 12, 26, 9)
-    bb_w, bb_up, bb_mid, bb_low = _bb_width(closes, 20, 2.0)
+    macd, macd_sig, macd_hist = _macd(closes)
+    bb_w, bb_up, bb_mid, bb_low = _bb_width(closes, 20)
 
-    # ولتیلیتی کوتاه‌مدت (ریشه واریانس ۳۰ بازده اخیر)
+    # نوسان کوتاه
     short_win = min(30, len(r_win))
     short_sigma = _std(r_win, short_win) if short_win >= 2 else sigma
     if short_sigma == 0:
         short_sigma = sigma
 
-    # 5) تعدیل میانگین و واریانس براساس اندیکاتورها (بدون ML/On-chain)
-    mu_adj = mu
-    mu_adj += 0.15 * trend                     # مومنتوم
-    if macd_hist > 0:                           # جهت MACD
+    mu_adj = mu + 0.15 * trend
+    if macd_hist > 0:
         mu_adj += 0.10 * abs(mu)
     elif macd_hist < 0:
         mu_adj -= 0.10 * abs(mu)
-    if rsi_val > 70:                            # اشباع خرید/فروش
+    if rsi_val > 70:
         mu_adj -= 0.20 * abs(mu)
     elif rsi_val < 30:
         mu_adj += 0.20 * abs(mu)
 
-    # واریانس پویا با بولینگر + کوتاه‌مدت
+    sigma_adj = 0.5 * sigma + 0.5 * short_sigma
     median_bb_w = 0.04
     bb_scale = max(0.5, min(1.5, bb_w / median_bb_w if median_bb_w else 1.0))
-    sigma_adj = 0.5 * sigma + 0.5 * short_sigma
     sigma_adj *= bb_scale
 
-    # 6) تبدیل افق زمانی به تعداد قدم‌ها
     n = max(1, int((hours_ahead * 60) / use_step))
 
-    # 7) پروسه GBM با پارامترهای تعدیل‌شده
     log_S0 = math.log(last_price)
     log_mean = log_S0 + n * mu_adj
     log_std = math.sqrt(n) * sigma_adj
@@ -420,26 +407,14 @@ def predict_btc_price(hours_ahead=4):
     ci95 = (math.exp(log_mean - 1.96 * log_std), math.exp(log_mean + 1.96 * log_std))
 
     return {
-        "last": last_price,
-        "point": point,
-        "ci68": ci68,
-        "ci95": ci95,
-        "mu": mu,
-        "sigma": sigma,
-        "mu_adj": mu_adj,
-        "sigma_adj": sigma_adj,
-        "trend": trend,
-        "rsi": rsi_val,
-        "macd": macd,
-        "macd_sig": macd_sig,
-        "macd_hist": macd_hist,
-        "bb_width": bb_w,
-        "bb_up": bb_up,
-        "bb_mid": bb_mid,
-        "bb_low": bb_low,
-        "n": n,
-        "step": use_step,
-        "source": source
+        "last": last_price, "point": point,
+        "ci68": ci68, "ci95": ci95,
+        "mu": mu, "sigma": sigma,
+        "mu_adj": mu_adj, "sigma_adj": sigma_adj,
+        "trend": trend, "rsi": rsi_val,
+        "macd": macd, "macd_sig": macd_sig, "macd_hist": macd_hist,
+        "bb_width": bb_w, "bb_up": bb_up, "bb_mid": bb_mid, "bb_low": bb_low,
+        "n": n, "step": use_step, "source": source, "closes": closes
     }
 
 def build_btc_forecast_text(hours=4):
@@ -455,14 +430,11 @@ def build_btc_forecast_text(hours=4):
     trend_pc = res["trend"] * 100
     source = res["source"]
 
-    # جدول جمع‌بندی برای Markdown تلگرام
     table = (
         "```\n"
         f"{'Metric':<18}{'Value':>18}\n"
         f"{'-'*36}\n"
         f"{'Source':<18}{source:>18}\n"
-        f"{'Step (min)':<18}{res['step']:>18}\n"
-        f"{'Candles (n)':<18}{res['n']:>18}\n"
         f"{'Price (now)':<18}${last:>17,.2f}\n"
         f"{'Forecast':<18}${point:>17,.2f}\n"
         f"{'CI 68% Low':<18}${l68:>17,.2f}\n"
@@ -473,34 +445,42 @@ def build_btc_forecast_text(hours=4):
         f"{'RSI(14)':<18}{rsi_val:>18.1f}\n"
         f"{'MACD Hist':<18}{res['macd_hist']:>18.6f}\n"
         f"{'BB Width':<18}{res['bb_width']:>18.4f}\n"
-        f"{'sigma (orig)':<18}{res['sigma']:>18.6f}\n"
-        f"{'sigma (adj)':<18}{res['sigma_adj']:>18.6f}\n"
         "```\n"
-    )
-
-    # توضیح کوتاه درباره معنی بازه‌ها
-    ci_explain = (
-        "🔎 *معنی بازه‌ها:*\n"
-        "• **۶۸٪** یعنی با احتمال حدوداً ۶۸٪، قیمت در این بازه می‌ماند.\n"
-        "• **۹۵٪** یعنی با احتمال حدوداً ۹۵٪، قیمت از این بازه بیرون نمی‌زند.\n"
-        "این‌ها «بازه‌های اطمینان آماری» بر اساس نوسان اخیر بازار هستند و پیشنهاد معاملاتی نیستند.\n"
     )
 
     return (
         "🔮 *BTC 4h Forecast (Enhanced)*\n"
-        f"⏱ افق: {hours} ساعت ({res['n']} کندل، هر {res['step']} دقیقه)\n"
         f"📊 منبع داده: {source}\n"
         f"💵 قیمت فعلی: ${last:,.2f}\n"
         f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
         f"📏 بازه ۶۸٪: ${l68:,.2f} — ${u68:,.2f}\n"
         f"📐 بازه ۹۵٪: ${l95:,.2f} — ${u95:,.2f}\n"
-        f"📈 مومنتوم EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
-        "🧠 تعدیل با MACD، باند بولینگر و ولتیلیتی کوتاه‌مدت انجام شده.\n\n"
+        f"📈 EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
         + table +
-        ci_explain +
-        "⚙️ روش: GBM با μ/σ پویا (Momentum + MACD + RSI + BB)\n"
-        "⚠️ *این یک سناریوی آماری است؛ توصیه معاملاتی محسوب نمی‌شود.*"
+        "⚠️ *سناریوی آماری است؛ توصیه معاملاتی محسوب نمی‌شود.*"
     )
+
+def build_btc_forecast_chart(hours=4):
+    res = predict_btc_price(hours)
+    if "error" in res:
+        return None, res["error"]
+
+    closes = res["closes"]
+    forecast = res["point"]
+    l95, u95 = res["ci95"]
+
+    plt.figure(figsize=(8,4))
+    plt.plot(closes[-100:], label="Price", color="blue")
+    plt.axhline(forecast, color="green", linestyle="--", label="Forecast")
+    plt.axhline(l95, color="red", linestyle=":", label="CI95 Low")
+    plt.axhline(u95, color="red", linestyle=":", label="CI95 High")
+    plt.title("BTC Forecast (next 4h)")
+    plt.legend()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close()
+    return buf, None
     
 # ================== منو ==================
 def send_interval_menu(chat_id):
@@ -514,9 +494,9 @@ def send_interval_menu(chat_id):
     ]
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
+    # یک دکمه برای پیش‌بینی که دو پیام می‌فرستد (متن + نمودار)
+    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC (Enhanced)", callback_data="predict_btc_4h"))
     markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
-    # برچسب را ساده نگه می‌داریم تا ساختار دست نخورَد؛ callback همانی است
-    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC", callback_data="predict_btc_4h"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 
@@ -541,8 +521,23 @@ def callback_top10(call):
 def callback_predict_btc_4h(call):
     chat_id = call.message.chat.id
     bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
+    # پیام 1: متن + توضیح 95%
     text = build_btc_forecast_text(hours=4)
-    send_message(chat_id, text)
+    ci_note = (
+        "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
+        "با تقریباً ۹۵٪ احتمال قیمتِ ۴ ساعت آینده بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
+        "این یک برآورد آماریه، نه قطعیت."
+    )
+    send_message(chat_id, text + ci_note)
+    # پیام 2: نمودار
+    img_buf, err = build_btc_forecast_chart(hours=4)
+    if img_buf:
+        try:
+            bot.send_photo(chat_id, img_buf)
+        except Exception as e:
+            print(f"[SendPhoto Error] {e}")
+    elif err:
+        send_message(chat_id, f"⚠️ {err}")
 
 
 # ================== دستورات ==================
@@ -585,21 +580,23 @@ def top10(message):
 @bot.message_handler(commands=['predict'])
 def predict(message):
     chat_id = message.chat.id
+    # همان رفتار دکمه: دو پیام (متن + نمودار)
     text = build_btc_forecast_text(hours=4)
-    send_message(chat_id, text)
-
-
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def add_wallet(message):
-    chat_id = message.chat.id
-    wallet = message.text.strip()
-    if not wallet or len(wallet) < 5:
-        send_message(chat_id, "❌ ولت نامعتبره.")
-        return
-    user_wallets.setdefault(chat_id, []).append(wallet)
-    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-
-
+    ci_note = (
+        "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
+        "با تقریباً ۹۵٪ احتمال قیمتِ ۴ ساعت آینده بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
+        "این یک برآورد آماریه، نه قطعیت."
+    )
+    send_message(chat_id, text + ci_note)
+    img_buf, err = build_btc_forecast_chart(hours=4)
+    if img_buf:
+        try:
+            bot.send_photo(chat_id, img_buf)
+        except Exception as e:
+            print(f"[SendPhoto Error] {e}")
+    elif err:
+        send_message(chat_id, f"⚠️ {err}")
+        
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
@@ -609,7 +606,9 @@ def run_scheduler():
         time.sleep(1)
 
 
+# اجرای Scheduler در یک Thread جدا
 threading.Thread(target=run_scheduler, daemon=True).start()
 
 print("🤖 Bot started...")
 bot.infinity_polling()
+
