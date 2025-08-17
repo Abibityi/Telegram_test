@@ -92,10 +92,10 @@ def _normalize_from_hyperliquid(raw):
             continue
     return out
     
-    
 # ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
     headers = {"User-Agent": "Mozilla/5.0"}  
+
     try:
         url = f"https://hyperdash.info/api/v1/trader/{wallet}/positions"
         r = requests.get(url, headers=headers, timeout=10)
@@ -116,7 +116,7 @@ def get_positions(wallet):
         print(f"[Hyperliquid] error for {wallet}: {e}")
 
     return []
-
+    
 # ---------- فرمت پیام ----------
 def format_position_line(p):
     lines = [
@@ -129,12 +129,12 @@ def format_position_line(p):
     lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
     return "\n".join(lines)
 
+
 def send_message(chat_id, text):
     try:
         bot.send_message(chat_id, text, parse_mode="Markdown")
     except Exception as e:
         print(f"[SendMessage Error] {e}")
-        
         
 # ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
 def check_positions():
@@ -192,7 +192,7 @@ def periodic_report():
             else:
                 send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
                 
- # ================== گزارش ۱۰ ارز برتر ==================
+# ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -232,7 +232,7 @@ def get_top10_report():
         return f"⚠️ خطا در دریافت گزارش: {e}"
         
         
-# ================== پیش‌بینی BTC (قابل تنظیم) ==================
+# ================== پیش‌بینی BTC (بهبود دقت + نمودار) ==================
 import matplotlib.pyplot as plt
 import io
 
@@ -331,7 +331,7 @@ def _fetch_kraken_closes(pair="XBTUSDT", interval=60):
     closes = [float(c[4]) for c in ohlc]
     times = [int(c[0]) for c in ohlc]
     return times, closes
-    
+
 def predict_btc_price(hours_ahead=4):
     # Binance → Kraken fallback
     use_step = 5
@@ -482,9 +482,12 @@ def build_btc_forecast_chart(hours=4):
     plt.close()
     return buf, None
     
-    
-# ================== منو ==================
+# ================== منوها ==================
 def send_interval_menu(chat_id):
+    """
+    ✅ فقط تنظیم بازه گزارش دوره‌ای
+    (دکمه‌های 'پیش‌بینی' و 'تاپ۱۰' از این منو حذف شدند)
+    """
     markup = InlineKeyboardMarkup()
     options = [
         ("1 دقیقه", 1),
@@ -495,12 +498,28 @@ def send_interval_menu(chat_id):
     ]
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    # دکمه‌ی پیش‌بینی ۴ساعته (قدیمی) + دکمه‌ی جدید برای انتخاب بازه
-    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC (Enhanced)", callback_data="predict_btc_4h"))
-    markup.add(InlineKeyboardButton("🕰 انتخاب بازه پیش‌بینی BTC", callback_data="predict_btc_menu"))
-    markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
-    
+
+
+def send_predict_menu(chat_id):
+    """
+    ✅ منوی انتخاب بازه پیش‌بینی BTC
+    از طریق /predict باز می‌شود.
+    """
+    markup = InlineKeyboardMarkup()
+    hour_opts = [1, 2, 4, 8, 12, 24]
+    row = []
+    for h in hour_opts:
+        row.append(InlineKeyboardButton(f"{h} ساعت", callback_data=f"predict_h_{h}"))
+        if len(row) == 3:
+            markup.row(*row)
+            row = []
+    if row:
+        markup.row(*row)
+    bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
+
+
+# ================== Callback Handlers ==================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
 def callback_interval(call):
     chat_id = call.message.chat.id
@@ -509,68 +528,26 @@ def callback_interval(call):
     bot.answer_callback_query(call.id, f"بازه {val} دقیقه‌ای انتخاب شد ✅")
     send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* برای شما ارسال میشه.")
 
-@bot.callback_query_handler(func=lambda call: call.data == "top10")
-def callback_top10(call):
-    chat_id = call.message.chat.id
-    report = get_top10_report()
-    bot.answer_callback_query(call.id, "📊 گزارش ارسال شد")
-    send_message(chat_id, report)
 
-@bot.callback_query_handler(func=lambda call: call.data == "predict_btc_4h")
-def callback_predict_btc_4h(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
-    text = build_btc_forecast_text(hours=4)
-    ci_note = (
-        "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
-        "با تقریباً ۹۵٪ احتمال قیمتِ بازه‌ی انتخابی بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
-        "این یک برآورد آماریه، نه قطعیت."
-    )
-    send_message(chat_id, text + ci_note)
-    img_buf, err = build_btc_forecast_chart(hours=4)
-    if img_buf:
-        try:
-            bot.send_photo(chat_id, img_buf)
-        except Exception as e:
-            print(f"[SendPhoto Error] {e}")
-    elif err:
-        send_message(chat_id, f"⚠️ {err}")
-
-# ---------- منوی انتخاب بازه پیش‌بینی ----------
-@bot.callback_query_handler(func=lambda call: call.data == "predict_btc_menu")
-def callback_predict_btc_menu(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "بازه پیش‌بینی رو انتخاب کن")
-    mk = InlineKeyboardMarkup(row_width=3)
-    # گزینه‌ها: 1h, 2h, 4h, 6h, 12h, 24h
-    buttons = [
-        InlineKeyboardButton("1h", callback_data="predict_btc_hours_1"),
-        InlineKeyboardButton("2h", callback_data="predict_btc_hours_2"),
-        InlineKeyboardButton("4h", callback_data="predict_btc_hours_4"),
-        InlineKeyboardButton("6h", callback_data="predict_btc_hours_6"),
-        InlineKeyboardButton("12h", callback_data="predict_btc_hours_12"),
-        InlineKeyboardButton("24h", callback_data="predict_btc_hours_24"),
-    ]
-    # سه‌تایی در هر ردیف
-    mk.add(*buttons[:3])
-    mk.add(*buttons[3:])
-    bot.send_message(chat_id, "⏳ یکی از بازه‌ها رو انتخاب کن:", reply_markup=mk)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("predict_btc_hours_"))
-def callback_predict_btc_hours(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("predict_h_"))
+def callback_predict_hours(call):
     chat_id = call.message.chat.id
     try:
-        hours = int(call.data.split("_")[-1])
+        hours = int(call.data.split("_")[2])
     except Exception:
         hours = 4
     bot.answer_callback_query(call.id, f"پیش‌بینی {hours} ساعته در حال محاسبه…")
+
+    # پیام 1: متن + توضیح 95%
     text = build_btc_forecast_text(hours=hours)
     ci_note = (
         "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
-        "با تقریباً ۹۵٪ احتمال قیمتِ بازه‌ی انتخابی بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
+        "با تقریباً ۹۵٪ احتمال قیمت در بازه انتخابی بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
         "این یک برآورد آماریه، نه قطعیت."
     )
     send_message(chat_id, text + ci_note)
+
+    # پیام 2: نمودار
     img_buf, err = build_btc_forecast_chart(hours=hours)
     if img_buf:
         try:
@@ -579,7 +556,6 @@ def callback_predict_btc_hours(call):
             print(f"[SendPhoto Error] {e}")
     elif err:
         send_message(chat_id, f"⚠️ {err}")
-        
         
 # ================== دستورات ==================
 @bot.message_handler(commands=['start'])
@@ -593,8 +569,7 @@ def start(message):
         "📍 /stop → توقف مانیتورینگ\n"
         "📍 /interval → تغییر بازه گزارش\n"
         "📍 /top10 → گزارش ۱۰ ارز برتر\n"
-        "📍 /predict → پیش‌بینی ۴ ساعته BTC\n"
-        "📍 /predictmenu → انتخاب بازه‌ی پیش‌بینی (1/2/4/6/12/24h)"
+        "📍 /predict → پیش‌بینی بیت‌کوین (انتخاب بازه)"
     )
 
 @bot.message_handler(commands=['stop'])
@@ -618,30 +593,18 @@ def top10(message):
 @bot.message_handler(commands=['predict'])
 def predict(message):
     chat_id = message.chat.id
-    # رفتار پیش‌فرض: 4h
-    text = build_btc_forecast_text(hours=4)
-    ci_note = (
-        "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
-        "با تقریباً ۹۵٪ احتمال قیمتِ بازه‌ی انتخابی بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
-        "این یک برآورد آماریه، نه قطعیت."
-    )
-    send_message(chat_id, text + ci_note)
-    img_buf, err = build_btc_forecast_chart(hours=4)
-    if img_buf:
-        try:
-            bot.send_photo(chat_id, img_buf)
-        except Exception as e:
-            print(f"[SendPhoto Error] {e}")
-    elif err:
-        send_message(chat_id, f"⚠️ {err}")
+    send_predict_menu(chat_id)
 
-@bot.message_handler(commands=['predictmenu'])
-def predictmenu(message):
+@bot.message_handler(func=lambda m: True, content_types=['text'])
+def add_wallet(message):
     chat_id = message.chat.id
-    # همان منوی Inline انتخاب بازه
-    callback_predict_btc_menu(type("obj", (), {"message": type("m", (), {"chat": type("c", (), {"id": chat_id})})(), "id": "fake"}))
-   
-   
+    wallet = message.text.strip()
+    if not wallet or len(wallet) < 5:
+        send_message(chat_id, "❌ ولت نامعتبره.")
+        return
+    user_wallets.setdefault(chat_id, []).append(wallet)
+    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
+    
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
@@ -650,7 +613,6 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(1)
 
-# اجرای Scheduler در یک Thread جدا
 threading.Thread(target=run_scheduler, daemon=True).start()
 
 print("🤖 Bot started...")
