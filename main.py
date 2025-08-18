@@ -253,7 +253,7 @@ def fetch_large_liqs():
             side = item.get("side", "?")
             usdt_val = price * qty
 
-            if usdt_val >= 1_000_000:  # فقط بالای یک میلیون
+            if usdt_val >= 10:  # فقط بالای یک میلیون
                 entry = f"🪙 {item.get('symbol','?')} | 💵 ${usdt_val:,.0f} | {side} @ {price:,.0f}"
                 if entry not in liquidations_list:
                     liquidations_list.append(entry)
