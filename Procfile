@@ -1,1 +1,2 @@
-worker: python main.py
+
+web: ./xray -config xray.json & python main.py
