@@ -738,7 +738,7 @@ def fetch_liquidations():
     new_liqs = []
     try:
         # Binance
-        url_binance = "https://fapi.binance.com/futures/data/liquidationOrders?limit=20"
+       url_binance = "https://fapi.binance.com/futures/data/allForceOrders?symbol=BTCUSDT&limit=50"
         r = requests.get(url_binance, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -760,7 +760,7 @@ def fetch_liquidations():
 
     try:
         # Bybit
-        url_bybit = "https://api.bybit.com/v2/public/liquidated-orders?symbol=BTCUSDT"
+      url_bybit = "https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=50"
         r = requests.get(url_bybit, timeout=10)
         if r.status_code == 200:
             data = r.json().get("result", [])
