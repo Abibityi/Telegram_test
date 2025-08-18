@@ -8,6 +8,9 @@ import os
 import math
 import matplotlib.pyplot as plt
 import io
+import websocket
+import json
+import threading
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================== تنظیمات ==================
@@ -731,91 +734,102 @@ def send_predict_menu(chat_id):
     bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
 # هر ۴ ساعت گزارش خودکار
     
-# ================== لیکوییدیشن‌ها (Coinglass) ==================
-liq_list = []              # ذخیره ۱۰ لیکوییدیشن آخر
-LIQ_THRESHOLD = 10         # آستانه (برای تست ۱۰ دلار، بعداً بذار 1_000_000)
-subscribers = set()        # لیست کاربرا برای ارسال خودکار
-
-# کلید Coinglass (از خودت گرفتم)
-COINGLASS_API_KEY = "e3e715e0f8cb47eda377f8bdab5a41c5"
-
-def fetch_liquidations():
-    new_liqs = []
-    try:
-        # ارزهایی که می‌خوای بگیری
-        symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-        for sym in symbols:
-            url = f"https://open-api.coinglass.com/api/pro/v1/futures/liquidation_trades?symbol={sym}&pageSize=50&pageNum=1"
-            headers = {"coinglassSecret": COINGLASS_API_KEY}
-            r = requests.get(url, headers=headers, timeout=10)
-
-            if r.status_code == 200:
-                data = r.json().get("data", {}).get("list", [])
-                print(f"[Coinglass] {sym} → {len(data)} رکورد دریافت شد")
-
-                for d in data:
-                    usd_value = float(d.get("amount", 0))
-                    side = d.get("side", "-")
-                    exchange = d.get("exchangeName", "Unknown")
-                    if usd_value >= LIQ_THRESHOLD:
-                        new_liqs.append({
-                            "exchange": exchange,
-                            "symbol": sym,
-                            "side": side,
-                            "value": usd_value
-                        })
-            else:
-                print(f"[Coinglass] خطای API برای {sym}: {r.status_code} - {r.text}")
-
-    except Exception as e:
-        print(f"[Coinglass error] {e}")
-
-    if not new_liqs:
-        print("❌ هیچ لیکوییدیشنی بالای آستانه پیدا نشد.")
-
-    return new_liqs
 
 
-# آپدیت لیست ۱۰ تایی
-def update_liq_list():
-    global liq_list
-    new_liqs = fetch_liquidations()
-    if new_liqs:
-        liq_list = (new_liqs + liq_list)[:10]  # فقط ۱۰ تا آخر نگه داریم
-        print(f"✅ {len(new_liqs)} لیکوییدیشن جدید اضافه شد.")
-    else:
-        print("ℹ️ دیتای جدیدی نبود.")
+# ================== تنظیمات لیکوییدیشن ==================
+LIQ_THRESHOLD = 10   # 🔹 تستی: بالای ۱۰ دلار (بعداً بزن 1_000_000)
+MAX_LIQS = 10        # حداکثر ۱۰ رکورد نگهداری بشه
+liq_list = []
 
+# ================== Binance WebSocket ==================
+BINANCE_WS = (
+    "wss://fstream.binance.com/stream?"
+    "streams=btcusdt@forceOrder/ethusdt@forceOrder/bnbusdt@forceOrder"
+)
 
-# قالب‌بندی گزارش
-def format_liq_report():
+def start_binance_ws():
+    """شروع وب‌سوکت بایننس برای گرفتن لیکوییدیشن‌ها"""
+    def on_message(ws, message):
+        try:
+            data = json.loads(message)
+            order = data["data"]["o"]
+
+            symbol = order["s"]
+            side = order["S"]
+            price = float(order["ap"])
+            qty = float(order["q"])
+            notional = price * qty
+
+            if notional >= LIQ_THRESHOLD:
+                event = (
+                    f"🔴 Liquidation\n"
+                    f"📌 Symbol: {symbol}\n"
+                    f"📈 Side: {side}\n"
+                    f"💰 Notional: {notional:.2f} USD\n"
+                    f"💲 Price: {price}\n"
+                    f"📦 Quantity: {qty}"
+                )
+
+                # ذخیره در لیست
+                liq_list.append(event)
+                if len(liq_list) > MAX_LIQS:
+                    liq_list.pop(0)
+
+                print(event)
+                print("-" * 30)
+
+        except Exception as e:
+            print("❌ Error parsing message:", e)
+            print("Raw:", message)
+
+    def on_error(ws, error):
+        print("❌ WebSocket Error:", error)
+
+    def on_close(ws, close_status_code, close_msg):
+        print("🔌 WebSocket Connection closed")
+
+    def on_open(ws):
+        print("✅ Connected to Binance WebSocket (BTC/ETH/BNB)")
+
+    ws = websocket.WebSocketApp(
+        BINANCE_WS,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close,
+        on_open=on_open
+    )
+    ws.run_forever()
+
+def run_ws_thread():
+    """اجرای وب‌سوکت در ترد جداگانه"""
+    ws_thread = threading.Thread(target=start_binance_ws, daemon=True)
+    ws_thread.start()
+
+def get_liq_report():
+    """متن گزارش لیکوییدیشن‌ها"""
     if not liq_list:
-        return "❌ هنوز لیکوییدیشنی ثبت نشده."
-    report = "📊 آخرین لیکوییدیشن‌ها (Coinglass):\n\n"
-    for l in liq_list:
-        report += f"📍 {l['exchange']} | {l['symbol']} | {l['side']} | 💰 {l['value']:.2f}$\n"
-    return report
+        return "⚠️ هنوز لیکوییدیشنی ثبت نشده."
+    return "\n\n".join(liq_list)
 
-
-# دستور کاربر برای دریافت گزارش
+# ================== دستورات تلگرام ==================
 @bot.message_handler(commands=["liqs"])
 def send_liqs(message):
-    subscribers.add(message.chat.id)  # ذخیره کاربر برای گزارش خودکار
-    bot.reply_to(message, format_liq_report())
+    bot.reply_to(message, get_liq_report())
 
-
-# ارسال خودکار برای همه کاربرا
+# هر ۴ ساعت گزارش برای همه مشترک‌ها
 def auto_send_liqs():
-    report = format_liq_report()
-    for chat_id in subscribers:
+    report = get_liq_report()
+    for user in subscribers:
         try:
-            bot.send_message(chat_id, "⏰ گزارش خودکار لیکوییدیشن:\n" + report)
-        except Exception as e:
-            print(f"[AutoSend error] {e}")
+            bot.send_message(user, report)
+        except:
+            pass
+
+schedule.every(4).hours.do(auto_send_liqs)
 
 
 # ================== زمان‌بندی ==================
-schedule.every(1).minutes.do(update_liq_list)   # هر ۱ دقیقه دیتای جدید
+ # هر ۱ دقیقه دیتای جدید
 schedule.every(4).hours.do(auto_send_liqs)      # هر ۴ ساعت گزارش خودکار    
     
 # ================== دستورات ==================
@@ -913,5 +927,9 @@ def callback_query(call):
 
         except Exception as e:
             send_message(chat_id, f"⚠️ خطا در پیش‌بینی: {e}")
-print("🤖 Bot started...")
-bot.infinity_polling()
+ 
+ 
+if __name__ == "__main__":
+    run_ws_thread()         # 🔹 وب‌سوکت بایننس راه میفته
+    print("🚀 Bot started...")
+    bot.infinity_polling()
