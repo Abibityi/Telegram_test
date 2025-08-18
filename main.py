@@ -729,68 +729,46 @@ def send_predict_menu(chat_id):
     if row:
         markup.row(*row)
     bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
+# هر ۴ ساعت گزارش خودکار
     
-# ================== لیکوییدیشن‌ها ==================
+# ================== لیکوییدیشن‌ها (Coinglass) ==================
 liq_list = []              # ذخیره ۱۰ لیکوییدیشن آخر
 LIQ_THRESHOLD = 10         # آستانه (برای تست ۱۰ دلار، بعداً بذار 1_000_000)
 subscribers = set()        # لیست کاربرا برای ارسال خودکار
 
-# گرفتن دیتای لیکوییدیشن از بایننس و بای‌بیت
+# کلید Coinglass (از خودت گرفتم)
+COINGLASS_API_KEY = "e3e715e0f8cb47eda377f8bdab5a41c5"
+
 def fetch_liquidations():
     new_liqs = []
-
-    # ----- Binance -----
     try:
-        symbols_binance = ["BTCUSDT", "ETHUSDT", "XRPUSDT"]
-        for sym in symbols_binance:
-            url = f"https://fapi.binance.com/fapi/v1/allForceOrders?symbol={sym}&limit=50"
-            r = requests.get(url, timeout=10)
+        # ارزهایی که می‌خوای بگیری
+        symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        for sym in symbols:
+            url = f"https://open-api.coinglass.com/api/pro/v1/futures/liquidation_trades?symbol={sym}&pageSize=50&pageNum=1"
+            headers = {"coinglassSecret": COINGLASS_API_KEY}
+            r = requests.get(url, headers=headers, timeout=10)
+
             if r.status_code == 200:
-                data = r.json()
-                print(f"[Binance] {sym} → {len(data)} رکورد دریافت شد")
+                data = r.json().get("data", {}).get("list", [])
+                print(f"[Coinglass] {sym} → {len(data)} رکورد دریافت شد")
+
                 for d in data:
-                    qty = float(d.get("origQty", 0))
-                    price = float(d.get("price", 0))
-                    side = d.get("side")
-                    usd_value = qty * price
+                    usd_value = float(d.get("amount", 0))
+                    side = d.get("side", "-")
+                    exchange = d.get("exchangeName", "Unknown")
                     if usd_value >= LIQ_THRESHOLD:
                         new_liqs.append({
-                            "exchange": "Binance",
+                            "exchange": exchange,
                             "symbol": sym,
                             "side": side,
                             "value": usd_value
                         })
             else:
-                print(f"[Binance] خطای API برای {sym}: {r.status_code}")
-    except Exception as e:
-        print(f"[Binance error] {e}")
+                print(f"[Coinglass] خطای API برای {sym}: {r.status_code} - {r.text}")
 
-    # ----- Bybit -----
-    try:
-        symbols_bybit = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-        for sym in symbols_bybit:
-            url = f"https://api.bybit.com/v5/market/liquidation?category=linear&symbol={sym}&limit=50"
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                result = r.json().get("result", {})
-                data = result.get("list", [])
-                print(f"[Bybit] {sym} → {len(data)} رکورد دریافت شد")
-                for d in data:
-                    qty = float(d.get("size", 0))
-                    price = float(d.get("price", 0))
-                    side = d.get("side")
-                    usd_value = qty * price
-                    if usd_value >= LIQ_THRESHOLD:
-                        new_liqs.append({
-                            "exchange": "Bybit",
-                            "symbol": sym,
-                            "side": side,
-                            "value": usd_value
-                        })
-            else:
-                print(f"[Bybit] خطای API برای {sym}: {r.status_code}")
     except Exception as e:
-        print(f"[Bybit error] {e}")
+        print(f"[Coinglass error] {e}")
 
     if not new_liqs:
         print("❌ هیچ لیکوییدیشنی بالای آستانه پیدا نشد.")
@@ -813,7 +791,7 @@ def update_liq_list():
 def format_liq_report():
     if not liq_list:
         return "❌ هنوز لیکوییدیشنی ثبت نشده."
-    report = "📊 آخرین لیکوییدیشن‌ها:\n\n"
+    report = "📊 آخرین لیکوییدیشن‌ها (Coinglass):\n\n"
     for l in liq_list:
         report += f"📍 {l['exchange']} | {l['symbol']} | {l['side']} | 💰 {l['value']:.2f}$\n"
     return report
@@ -838,23 +816,7 @@ def auto_send_liqs():
 
 # ================== زمان‌بندی ==================
 schedule.every(1).minutes.do(update_liq_list)   # هر ۱ دقیقه دیتای جدید
-schedule.every(4).hours.do(auto_send_liqs)      # هر ۴ ساعت گزارش خودکار
-# دستور دستی
-@bot.message_handler(commands=['liqs'])
-def liqs_cmd(message):
-    chat_id = message.chat.id
-    send_message(chat_id, format_liq_report())
-
-# ارسال خودکار هر 4 ساعت
-def send_liqs_periodic():
-    report = format_liq_report()
-    for chat_id in user_wallets.keys():
-        send_message(chat_id, report)
-
-# زمان‌بندی
-schedule.every(1).minutes.do(update_liq_list)   # هر دقیقه آپدیت لیست
-schedule.every(4).hours.do(send_liqs_periodic)  # هر 4 ساعت ارسال برای همه    
-    
+schedule.every(4).hours.do(auto_send_liqs)      # هر ۴ ساعت گزارش خودکار    
     
 # ================== دستورات ==================
 @bot.message_handler(commands=['start'])
