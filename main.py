@@ -730,105 +730,115 @@ def send_predict_menu(chat_id):
         markup.row(*row)
     bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
     
-# ================= لیکوئیدیشن‌ها ================= #
-liq_list = []   # ذخیره ۱۰ لیکوییدیشن آخر
-LIQ_THRESHOLD = 10   # برای تست ۱۰ دلار (بعدا بذار 1_000_000)
+# ================== لیکوییدیشن‌ها ==================
+liq_list = []              # ذخیره ۱۰ لیکوییدیشن آخر
+LIQ_THRESHOLD = 10         # آستانه (برای تست ۱۰ دلار، بعداً بذار 1_000_000)
+subscribers = set()        # لیست کاربرا برای ارسال خودکار
 
-users = set()   # لیست همه کاربرای ربات برای ارسال خودکار
-
-# گرفتن دیتا از بایننس و بای‌بیت
+# گرفتن دیتای لیکوییدیشن از بایننس و بای‌بیت
 def fetch_liquidations():
     new_liqs = []
 
+    # ----- Binance -----
     try:
-        # Binance
-        url_binance = "https://fapi.binance.com/fapi/v1/allForceOrders?symbol=BTCUSDT&limit=50"
-        r = requests.get(url_binance, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            for d in data:
-                qty = float(d.get("origQty", 0))
-                price = float(d.get("price", 0))
-                symbol = d.get("symbol")
-                side = d.get("side")
-                usd_value = qty * price
-                if usd_value >= LIQ_THRESHOLD and symbol in ("BTCUSDT", "ETHUSDT", "XRPUSDT"):
-                    new_liqs.append({
-                        "exchange": "Binance",
-                        "symbol": symbol,
-                        "side": side,
-                        "value": usd_value
-                    })
+        symbols_binance = ["BTCUSDT", "ETHUSDT", "XRPUSDT"]
+        for sym in symbols_binance:
+            url = f"https://fapi.binance.com/fapi/v1/allForceOrders?symbol={sym}&limit=50"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                print(f"[Binance] {sym} → {len(data)} رکورد دریافت شد")
+                for d in data:
+                    qty = float(d.get("origQty", 0))
+                    price = float(d.get("price", 0))
+                    side = d.get("side")
+                    usd_value = qty * price
+                    if usd_value >= LIQ_THRESHOLD:
+                        new_liqs.append({
+                            "exchange": "Binance",
+                            "symbol": sym,
+                            "side": side,
+                            "value": usd_value
+                        })
+            else:
+                print(f"[Binance] خطای API برای {sym}: {r.status_code}")
     except Exception as e:
-        print(f"[Binance LIQ error] {e}")
+        print(f"[Binance error] {e}")
 
+    # ----- Bybit -----
     try:
-        # Bybit
-        url_bybit = "https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=50"
-        r = requests.get(url_bybit, timeout=10)
-        if r.status_code == 200:
-            result = r.json().get("result", {})
-            data = result.get("list", [])
-            for d in data:
-                qty = float(d.get("qty", 0))
-                price = float(d.get("price", 0))
-                symbol = d.get("symbol")
-                side = d.get("side")
-                usd_value = qty * price
-                if usd_value >= LIQ_THRESHOLD and symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT"):
-                    new_liqs.append({
-                        "exchange": "Bybit",
-                        "symbol": symbol,
-                        "side": side,
-                        "value": usd_value
-                    })
+        symbols_bybit = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        for sym in symbols_bybit:
+            url = f"https://api.bybit.com/v5/market/liquidation?category=linear&symbol={sym}&limit=50"
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                result = r.json().get("result", {})
+                data = result.get("list", [])
+                print(f"[Bybit] {sym} → {len(data)} رکورد دریافت شد")
+                for d in data:
+                    qty = float(d.get("size", 0))
+                    price = float(d.get("price", 0))
+                    side = d.get("side")
+                    usd_value = qty * price
+                    if usd_value >= LIQ_THRESHOLD:
+                        new_liqs.append({
+                            "exchange": "Bybit",
+                            "symbol": sym,
+                            "side": side,
+                            "value": usd_value
+                        })
+            else:
+                print(f"[Bybit] خطای API برای {sym}: {r.status_code}")
     except Exception as e:
-        print(f"[Bybit LIQ error] {e}")
+        print(f"[Bybit error] {e}")
+
+    if not new_liqs:
+        print("❌ هیچ لیکوییدیشنی بالای آستانه پیدا نشد.")
 
     return new_liqs
 
-# آپدیت لیست لیکوییدیشن‌ها
+
+# آپدیت لیست ۱۰ تایی
 def update_liq_list():
     global liq_list
     new_liqs = fetch_liquidations()
     if new_liqs:
-        for liq in new_liqs:
-            liq_list.append(liq)
-            if len(liq_list) > 10:  # فقط ۱۰ تا نگه داره
-                liq_list.pop(0)
-        print("[+] لیست لیکوییدیشن‌ها آپدیت شد")
+        liq_list = (new_liqs + liq_list)[:10]  # فقط ۱۰ تا آخر نگه داریم
+        print(f"✅ {len(new_liqs)} لیکوییدیشن جدید اضافه شد.")
     else:
-        print("[-] دیتای جدیدی پیدا نشد")
+        print("ℹ️ دیتای جدیدی نبود.")
 
-# فرمت گزارش برای ارسال
+
+# قالب‌بندی گزارش
 def format_liq_report():
     if not liq_list:
         return "❌ هنوز لیکوییدیشنی ثبت نشده."
     report = "📊 آخرین لیکوییدیشن‌ها:\n\n"
-    for liq in liq_list:
-        report += f"📍 {liq['exchange']} | {liq['symbol']} | {liq['side']} | 💰 {liq['value']:.2f}$\n"
+    for l in liq_list:
+        report += f"📍 {l['exchange']} | {l['symbol']} | {l['side']} | 💰 {l['value']:.2f}$\n"
     return report
 
-# دستور کاربر برای گزارش
-@bot.message_handler(commands=['liq'])
-def send_liq_report(message):
-    users.add(message.chat.id)   # ذخیره کاربر برای ارسال خودکار
-    report = format_liq_report()
-    bot.send_message(message.chat.id, report)
 
-# ارسال خودکار برای همه کاربرا هر ۴ ساعت
-def auto_send_liq_report():
+# دستور کاربر برای دریافت گزارش
+@bot.message_handler(commands=["liqs"])
+def send_liqs(message):
+    subscribers.add(message.chat.id)  # ذخیره کاربر برای گزارش خودکار
+    bot.reply_to(message, format_liq_report())
+
+
+# ارسال خودکار برای همه کاربرا
+def auto_send_liqs():
     report = format_liq_report()
-    for user in users:
+    for chat_id in subscribers:
         try:
-            bot.send_message(user, f"⏰ گزارش خودکار لیکوییدیشن:\n\n{report}")
+            bot.send_message(chat_id, "⏰ گزارش خودکار لیکوییدیشن:\n" + report)
         except Exception as e:
             print(f"[AutoSend error] {e}")
 
-# زمان‌بندی آپدیت و ارسال خودکار
-schedule.every(4).hours.do(update_liq_list)
-schedule.every(4).hours.do(auto_send_liq_report)
 
+# ================== زمان‌بندی ==================
+schedule.every(1).minutes.do(update_liq_list)   # هر ۱ دقیقه دیتای جدید
+schedule.every(4).hours.do(auto_send_liqs)      # هر ۴ ساعت گزارش خودکار
 # دستور دستی
 @bot.message_handler(commands=['liqs'])
 def liqs_cmd(message):
