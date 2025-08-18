@@ -35,7 +35,6 @@ def _sign_fmt(x):
     else:
         return f"🔴 {v:,.2f}"
         
-        
 # ---------- نرمال‌سازی داده‌های HyperDash ----------
 def _normalize_from_hyperdash(raw):
     out = []
@@ -193,118 +192,6 @@ def periodic_report():
             else:
                 send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
                 
-                
-# ================== کمکی‌های لانگ/شورت (۴ منبع) ==================
-def _fmt_pct(x):
-    try:
-        return f"{float(x)*100:.1f}%"
-    except:
-        try:
-            return f"{float(x):.1f}%"
-        except:
-            return "-"
-
-def fetch_binance_longshort(symbol):
-    """
-    Binance Futures Global Long/Short Account Ratio (5m)
-    خروجی: (long%, short%) به صورت عدد (0..100)
-    """
-    try:
-        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
-        params = {"symbol": f"{symbol.upper()}USDT", "period": "5m", "limit": 1}
-        r = requests.get(url, params=params, timeout=8, headers=HEADERS)
-        if r.status_code == 200:
-            data = r.json()
-            if data:
-                lng = float(data[0]["longAccount"])
-                sht = float(data[0]["shortAccount"])
-                return lng*100, sht*100, "Binance"
-    except Exception as e:
-        print(f"[Binance L/S] {symbol}: {e}")
-    return None, None, "Binance"
-
-def fetch_coinglass_longshort(symbol):
-    """
-    Coinglass (نیاز به COINGLASS_KEY اختیاری)
-    سعی می‌کنیم بدون کلید هم جواب بدیم؛ اگر نیاز بود از env بخونه.
-    خروجی: (long%, short%)
-    """
-    api_key = os.environ.get("COINGLASS_KEY", "")
-    headers = HEADERS.copy()
-    if api_key:
-        headers["coinglassSecret"] = api_key
-    try:
-        # نقطه پایان رایج Coinglass (ممکنه بسته به طرح/کلید تغییر کند)
-        url = "https://open-api.coinglass.com/api/pro/v1/futures/longShort"
-        params = {"symbol": symbol.upper()}
-        r = requests.get(url, params=params, timeout=8, headers=headers)
-        if r.status_code == 200:
-            js = r.json()
-            data = js.get("data") or []
-            if isinstance(data, list) and data:
-                # معمولاً آخرین آیتم جدیدترین است
-                last = data[-1]
-                lng = float(last.get("longRate", 0)) * 100
-                sht = float(last.get("shortRate", 0)) * 100
-                return lng, sht, "Coinglass"
-    except Exception as e:
-        print(f"[Coinglass L/S] {symbol}: {e}")
-    return None, None, "Coinglass"
-
-def fetch_bybit_longshort(symbol):
-    """
-    Bybit Long/Short Ratio (5min)
-    خروجی API معمولاً نسبت لانگ به شورت است (r). تبدیل به درصد:
-        long% = r/(1+r) , short% = 1/(1+r)
-    """
-    try:
-        url = "https://api.bybit.com/v5/market/long-short-ratio"
-        params = {"category": "linear", "symbol": f"{symbol.upper()}USDT", "period": "5min"}
-        r = requests.get(url, params=params, timeout=8, headers=HEADERS)
-        if r.status_code == 200:
-            js = r.json()
-            lst = js.get("result", {}).get("list", [])
-            if lst:
-                # آخرین مقدار
-                r_val = float(lst[0].get("longShortRatio", lst[-1].get("longShortRatio", 1)))
-                if r_val <= 0:
-                    return None, None, "Bybit"
-                long_pct = (r_val / (1.0 + r_val)) * 100.0
-                short_pct = 100.0 - long_pct
-                return long_pct, short_pct, "Bybit"
-    except Exception as e:
-        print(f"[Bybit L/S] {symbol}: {e}")
-    return None, None, "Bybit"
-
-def fetch_okx_longshort(symbol):
-    """
-    OKX Long/Short Account Ratio (5m)
-    بعضی پلن‌ها نیازمند period مشخص هستند.
-    """
-    try:
-        url = "https://www.okx.com/api/v5/market/long-short-account-ratio"
-        params = {"ccy": symbol.upper(), "period": "5m"}
-        r = requests.get(url, params=params, timeout=8, headers=HEADERS)
-        if r.status_code == 200:
-            js = r.json()
-            data = js.get("data", [])
-            if data:
-                # داده OKX معمولاً ratio می‌دهد (لانگ/شورت). تبدیل مشابه Bybit
-                ratio = float(data[-1].get("ratio", 1))
-                if ratio <= 0:
-                    return None, None, "OKX"
-                long_pct = (ratio / (1.0 + ratio)) * 100.0
-                short_pct = 100.0 - long_pct
-                return long_pct, short_pct, "OKX"
-    except Exception as e:
-        print(f"[OKX L/S] {symbol}: {e}")
-    return None, None, "OKX"
-
-def _render_ls_source(long_pct, short_pct, name):
-    if long_pct is None or short_pct is None:
-        return f"{name}: -"
-    return f"{name}: 🟢 {long_pct:.1f}% | 🔴 {short_pct:.1f}%"
-
 # ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
@@ -320,24 +207,22 @@ def get_top10_report():
             price = c.get("current_price", 0)
             change = c.get("price_change_percentage_24h", 0)
 
-            # چهار منبع لانگ/شورت (با برچسب منبع)
-            b_l, b_s, b_n = fetch_binance_longshort(symbol)
-            cg_l, cg_s, cg_n = fetch_coinglass_longshort(symbol)
-            by_l, by_s, by_n = fetch_bybit_longshort(symbol)
-            ok_l, ok_s, ok_n = fetch_okx_longshort(symbol)
-
-            ls_block = (
-                "📊 Long/Short (5m):\n"
-                f"• { _render_ls_source(b_l,  b_s,  b_n) }\n"
-                f"• { _render_ls_source(cg_l, cg_s, cg_n) }\n"
-                f"• { _render_ls_source(by_l, by_s, by_n) }\n"
-                f"• { _render_ls_source(ok_l, ok_s, ok_n) }"
-            )
+            bin_long, bin_short = "-", "-"
+            try:
+                b_url = f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={symbol.upper()}USDT&period=5m&limit=1"
+                b_res = requests.get(b_url, timeout=8, headers=HEADERS)
+                if b_res.status_code == 200:
+                    data = b_res.json()
+                    if data:
+                        bin_long = f"{float(data[0]['longAccount'])*100:.1f}%"
+                        bin_short = f"{float(data[0]['shortAccount'])*100:.1f}%"
+            except Exception as e:
+                print(f"[Binance] error for {symbol}: {e}")
 
             lines.append(
                 f"🪙 *{symbol}*\n"
                 f"💵 ${price:,.2f} ({change:+.2f}%)\n"
-                f"{ls_block}\n"
+                f"📊 Binance: 🟢 {bin_long} | 🔴 {bin_short}\n"
                 "━━━━━━━━━━"
             )
 
@@ -347,7 +232,7 @@ def get_top10_report():
         return f"⚠️ خطا در دریافت گزارش: {e}"
         
         
-# ================== پیش‌بینی ۴ساعته BTC (بهبود دقت + نمودار) ==================
+# ================== پیش‌بینی BTC (بهبود دقت + نمودار) ==================
 import matplotlib.pyplot as plt
 import io
 
@@ -564,7 +449,7 @@ def build_btc_forecast_text(hours=4):
     )
 
     return (
-        "🔮 *BTC 4h Forecast (Enhanced)*\n"
+        f"🔮 *BTC {hours}h Forecast (Enhanced)*\n"
         f"📊 منبع داده: {source}\n"
         f"💵 قیمت فعلی: ${last:,.2f}\n"
         f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
@@ -589,7 +474,7 @@ def build_btc_forecast_chart(hours=4):
     plt.axhline(forecast, color="green", linestyle="--", label="Forecast")
     plt.axhline(l95, color="red", linestyle=":", label="CI95 Low")
     plt.axhline(u95, color="red", linestyle=":", label="CI95 High")
-    plt.title("BTC Forecast (next 4h)")
+    plt.title(f"BTC Forecast (next {hours}h)")
     plt.legend()
     buf = io.BytesIO()
     plt.savefig(buf, format="png")
@@ -597,8 +482,12 @@ def build_btc_forecast_chart(hours=4):
     plt.close()
     return buf, None
     
-# ================== منو ==================
+# ================== منوها ==================
 def send_interval_menu(chat_id):
+    """
+    ✅ فقط تنظیم بازه گزارش دوره‌ای
+    (دکمه‌های 'پیش‌بینی' و 'تاپ۱۰' از این منو حذف شدند)
+    """
     markup = InlineKeyboardMarkup()
     options = [
         ("1 دقیقه", 1),
@@ -609,12 +498,28 @@ def send_interval_menu(chat_id):
     ]
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    # یک دکمه برای پیش‌بینی که دو پیام می‌فرستد (متن + نمودار)
-    markup.add(InlineKeyboardButton("🔮 پیش‌بینی ۴ساعته BTC (Enhanced)", callback_data="predict_btc_4h"))
-    markup.add(InlineKeyboardButton("📊 گزارش 10 ارز برتر", callback_data="top10"))
     bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 
+def send_predict_menu(chat_id):
+    """
+    ✅ منوی انتخاب بازه پیش‌بینی BTC
+    از طریق /predict باز می‌شود.
+    """
+    markup = InlineKeyboardMarkup()
+    hour_opts = [1, 2, 4, 8, 12, 24]
+    row = []
+    for h in hour_opts:
+        row.append(InlineKeyboardButton(f"{h} ساعت", callback_data=f"predict_h_{h}"))
+        if len(row) == 3:
+            markup.row(*row)
+            row = []
+    if row:
+        markup.row(*row)
+    bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
+
+
+# ================== Callback Handlers ==================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("interval_"))
 def callback_interval(call):
     chat_id = call.message.chat.id
@@ -624,28 +529,26 @@ def callback_interval(call):
     send_message(chat_id, f"⏱ گزارش دوره‌ای هر *{val} دقیقه* برای شما ارسال میشه.")
 
 
-@bot.callback_query_handler(func=lambda call: call.data == "top10")
-def callback_top10(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("predict_h_"))
+def callback_predict_hours(call):
     chat_id = call.message.chat.id
-    report = get_top10_report()
-    bot.answer_callback_query(call.id, "📊 گزارش ارسال شد")
-    send_message(chat_id, report)
+    try:
+        hours = int(call.data.split("_")[2])
+    except Exception:
+        hours = 4
+    bot.answer_callback_query(call.id, f"پیش‌بینی {hours} ساعته در حال محاسبه…")
 
-
-@bot.callback_query_handler(func=lambda call: call.data == "predict_btc_4h")
-def callback_predict_btc_4h(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "در حال محاسبه پیش‌بینی…")
     # پیام 1: متن + توضیح 95%
-    text = build_btc_forecast_text(hours=4)
+    text = build_btc_forecast_text(hours=hours)
     ci_note = (
         "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
-        "با تقریباً ۹۵٪ احتمال قیمتِ ۴ ساعت آینده بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
+        "با تقریباً ۹۵٪ احتمال قیمت در بازه انتخابی بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
         "این یک برآورد آماریه، نه قطعیت."
     )
     send_message(chat_id, text + ci_note)
+
     # پیام 2: نمودار
-    img_buf, err = build_btc_forecast_chart(hours=4)
+    img_buf, err = build_btc_forecast_chart(hours=hours)
     if img_buf:
         try:
             bot.send_photo(chat_id, img_buf)
@@ -666,9 +569,8 @@ def start(message):
         "📍 /stop → توقف مانیتورینگ\n"
         "📍 /interval → تغییر بازه گزارش\n"
         "📍 /top10 → گزارش ۱۰ ارز برتر\n"
-        "📍 /predict → پیش‌بینی ۴ ساعته BTC"
+        "📍 /predict → پیش‌بینی بیت‌کوین (انتخاب بازه)"
     )
-
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
@@ -677,12 +579,10 @@ def stop(message):
     user_intervals.pop(chat_id, None)
     send_message(chat_id, "⏹ مانیتورینگ متوقف شد.")
 
-
 @bot.message_handler(commands=['interval'])
 def interval(message):
     chat_id = message.chat.id
     send_interval_menu(chat_id)
-
 
 @bot.message_handler(commands=['top10'])
 def top10(message):
@@ -690,28 +590,21 @@ def top10(message):
     report = get_top10_report()
     send_message(chat_id, report)
 
-
 @bot.message_handler(commands=['predict'])
 def predict(message):
     chat_id = message.chat.id
-    # همان رفتار دکمه: دو پیام (متن + نمودار)
-    text = build_btc_forecast_text(hours=4)
-    ci_note = (
-        "\nℹ️ *توضیح بازه ۹۵٪*: اگر همین شرایط بازار ادامه پیدا کنه، "
-        "با تقریباً ۹۵٪ احتمال قیمتِ ۴ ساعت آینده بین حد پایین و بالای «CI 95%» قرار می‌گیره. "
-        "این یک برآورد آماریه، نه قطعیت."
-    )
-    send_message(chat_id, text + ci_note)
-    img_buf, err = build_btc_forecast_chart(hours=4)
-    if img_buf:
-        try:
-            bot.send_photo(chat_id, img_buf)
-        except Exception as e:
-            print(f"[SendPhoto Error] {e}")
-    elif err:
-        send_message(chat_id, f"⚠️ {err}")
-        
-        
+    send_predict_menu(chat_id)
+
+@bot.message_handler(func=lambda m: True, content_types=['text'])
+def add_wallet(message):
+    chat_id = message.chat.id
+    wallet = message.text.strip()
+    if not wallet or len(wallet) < 5:
+        send_message(chat_id, "❌ ولت نامعتبره.")
+        return
+    user_wallets.setdefault(chat_id, []).append(wallet)
+    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
+    
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
@@ -720,8 +613,6 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(1)
 
-
-# اجرای Scheduler در یک Thread جدا
 threading.Thread(target=run_scheduler, daemon=True).start()
 
 print("🤖 Bot started...")
