@@ -767,14 +767,15 @@ def fetch_liquidations():
         url_bybit = "https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=50"
         r = requests.get(url_bybit, timeout=10)
         if r.status_code == 200:
-            data = r.json().get("result", [])
+            result = r.json().get("result", {})
+            data = result.get("list", [])
             for d in data:
-                qty = float(d.get("qty", 0))
+                qty = float(d.get("size", 0))
                 price = float(d.get("price", 0))
                 symbol = d.get("symbol")
                 side = d.get("side")
                 usd_value = qty * price
-                if usd_value >= LIQ_THRESHOLD and symbol in ("BTCUSDT", "ETHUSDT", "XRPUSDT"):
+                if usd_value >= LIQ_THRESHOLD and symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT"):
                     new_liqs.append({
                         "exchange": "Bybit",
                         "symbol": symbol,
@@ -783,29 +784,6 @@ def fetch_liquidations():
                     })
     except Exception as e:
         print(f"[Bybit LIQ error] {e}")
-
-    return new_liqs
-
-
-def update_liq_list():
-    global liq_list
-    new_data = fetch_liquidations()
-    for liq in new_data:
-        if len(liq_list) >= 10:
-            liq_list.pop(0)  # قدیمی‌ترین حذف بشه
-        liq_list.append(liq)
-        print(f"[NEW LIQ] {liq}")
-
-    return new_liqs
-
-def update_liq_list():
-    global liq_list
-    new_data = fetch_liquidations()
-    for liq in new_data:
-        if len(liq_list) >= 10:
-            liq_list.pop(0)  # قدیمی‌ترین حذف بشه
-        liq_list.append(liq)
-        print(f"[NEW LIQ] {liq}")
 
 def format_liq_report():
     if not liq_list:
