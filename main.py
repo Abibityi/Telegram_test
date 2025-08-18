@@ -825,7 +825,10 @@ def callback_query(call):
             chart, err = build_btc_forecast_chart(hours)
 
             if chart:
-                bot.send_photo(chat_id, chart, caption=text, parse_mode="Markdown")
+                # کپشن کوتاه برای تصویر
+                bot.send_photo(chat_id, chart, caption="📊 نمودار پیش‌بینی BTC")
+                # متن کامل تحلیل جدا ارسال میشه
+                send_message(chat_id, text)
             else:
                 if err:
                     send_message(chat_id, err)
