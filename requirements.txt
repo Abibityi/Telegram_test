@@ -1,0 +1,5 @@
+pyTelegramBotAPI==4.16.1
+schedule==1.2.1
+requests==2.31.0
+flask
+matplotlib
