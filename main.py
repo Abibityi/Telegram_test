@@ -799,6 +799,40 @@ def run_scheduler():
         time.sleep(1)
 
 threading.Thread(target=run_scheduler, daemon=True).start()
+# ================== هندلر دکمه‌های شیشه‌ای ==================
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    chat_id = call.message.chat.id
+    data = call.data
 
+    # --- هندلر تغییر بازه گزارش دوره‌ای ---
+    if data.startswith("interval_"):
+        try:
+            val = int(data.split("_")[1])
+            user_intervals[chat_id] = val
+            bot.answer_callback_query(call.id, f"بازه گزارش {val} دقیقه تنظیم شد ✅")
+            send_message(chat_id, f"⏱ بازه گزارش به {val} دقیقه تغییر کرد.")
+        except:
+            bot.answer_callback_query(call.id, "خطا در پردازش بازه ❌")
+
+    # --- هندلر پیش‌بینی بیت‌کوین ---
+    elif data.startswith("predict_h_"):
+        try:
+            hours = int(data.split("_")[2])
+            bot.answer_callback_query(call.id, f"پیش‌بینی برای {hours} ساعت آینده ⏳")
+
+            text = build_btc_forecast_text(hours)
+            chart, err = build_btc_forecast_chart(hours)
+
+            if chart:
+                bot.send_photo(chat_id, chart, caption=text, parse_mode="Markdown")
+            else:
+                if err:
+                    send_message(chat_id, err)
+                else:
+                    send_message(chat_id, text)
+
+        except Exception as e:
+            send_message(chat_id, f"⚠️ خطا در پیش‌بینی: {e}")
 print("🤖 Bot started...")
 bot.infinity_polling()
