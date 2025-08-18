@@ -631,6 +631,7 @@ def predict_btc_price(hours_ahead=4):
         "strategies": strategies
     }
 
+# ------------------ تغییر ظاهر فقط در خروجی پیش‌بینی ------------------
 def build_btc_forecast_text(hours=4):
     res = predict_btc_price(hours)
     if "error" in res:
@@ -644,46 +645,24 @@ def build_btc_forecast_text(hours=4):
     trend_pc = res["trend"] * 100
     source = res["source"]
 
-    # جدول خلاصه
-    table = (
-        "```\n"
-        f"{'Metric':<18}{'Value':>18}\n"
-        f"{'-'*36}\n"
-        f"{'Source':<18}{source:>18}\n"
-        f"{'Price (now)':<18}${last:>17,.2f}\n"
-        f"{'Forecast':<18}${point:>17,.2f}\n"
-        f"{'CI 68% Low':<18}${l68:>17,.2f}\n"
-        f"{'CI 68% High':<18}${u68:>17,.2f}\n"
-        f"{'CI 95% Low':<18}${l95:>17,.2f}\n"
-        f"{'CI 95% High':<18}${u95:>17,.2f}\n"
-        f"{'EMA Momentum':<18}{trend_pc:>17.2f}%\n"
-        f"{'RSI(14)':<18}{rsi_val:>18.1f}\n"
-        f"{'MACD Hist':<18}{res['macd_hist']:>18.6f}\n"
-        f"{'BB Width':<18}{res['bb_width']:>18.4f}\n"
-        "```\n"
-    )
-
-    # لیست استراتژی‌ها با توضیح و بازهٔ قیمتی
-    strategies_text_lines = ["📊 *سیگنال استراتژی‌ها*:"]
-    for name, sig, desc, lo, hi in res["strategies"]:
-        rng = ""
-        if lo and hi:
-            rng = f"\n  🎯 *بازه تخمینی ({hours}ساعت آینده)*: ${lo:,.0f} — ${hi:,.0f}"
-        strategies_text_lines.append(f"- {name}: {sig}\n  {desc}{rng}")
-    strategies_text = "\n".join(strategies_text_lines)
-
-    return (
-        f"🔮 *پیش‌بینی BTC ({hours} ساعت آینده)*\n"
-        f"📊 منبع داده: {source}\n"
-        f"💵 قیمت فعلی: ${last:,.2f}\n"
-        f"🎯 پیش‌بینی نقطه‌ای: ${point:,.2f}\n"
-        f"📏 بازه ۶۸٪: ${l68:,.2f} — ${u68:,.2f}\n"
-        f"📐 بازه ۹۵٪: ${l95:,.2f} — ${u95:,.2f}\n"
+    # خلاصه فشرده و خواناتر
+    summary = (
+        f"🔮 *پیش‌بینی BTC ({hours}h)*\n"
+        f"📊 داده: *{source}*\n"
+        f"💵 قیمت فعلی: *${last:,.2f}*\n"
+        f"🎯 پیش‌بینی: *${point:,.2f}*\n"
+        f"📏 بازه ۶۸٪: `${l68:,.0f} — {u68:,.0f}`\n"
+        f"📐 بازه ۹۵٪: `${l95:,.0f} — {u95:,.0f}`\n"
         f"📈 EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
-        + table +
-        strategies_text +
-        "\n\n⚠️ *این یک سناریوی آماری و آموزشی است؛ توصیهٔ معاملاتی محسوب نمی‌شود.*"
     )
+
+    # سیگنال استراتژی‌ها به‌صورت لیست تمیز
+    strategies_text = "\n📊 *سیگنال استراتژی‌ها:*\n"
+    for name, sig, desc, lo, hi in res["strategies"]:
+        rng = f"\n    🎯 ${lo:,.0f} — ${hi:,.0f}" if lo and hi else ""
+        strategies_text += f"• *{name}*: {sig}\n    {desc}{rng}\n"
+
+    return summary + strategies_text + "\n⚠️ این فقط تحلیل آماری و آموزشی است."
 
 def build_btc_forecast_chart(hours=4):
     res = predict_btc_price(hours)
@@ -694,15 +673,24 @@ def build_btc_forecast_chart(hours=4):
     forecast = res["point"]
     l95, u95 = res["ci95"]
 
-    plt.figure(figsize=(8,4))
-    plt.plot(closes[-100:], label="Price", color="blue")
-    plt.axhline(forecast, color="green", linestyle="--", label="Forecast")
-    plt.axhline(l95, color="red", linestyle=":", label="CI95 Low")
-    plt.axhline(u95, color="red", linestyle=":", label="CI95 High")
-    plt.title(f"BTC Forecast (next {hours}h)")
+    # استایل فقط ظاهری
+    plt.style.use("dark_background")
+    plt.figure(figsize=(9,5))
+    plt.plot(closes[-100:], label="Price", color="#00BFFF", linewidth=2)
+    plt.axhline(forecast, color="#32CD32", linestyle="--", linewidth=2, label="Forecast")
+    plt.axhline(l95, color="#FF4500", linestyle=":", linewidth=1.5, label="CI95 Low")
+    plt.axhline(u95, color="#FF4500", linestyle=":", linewidth=1.5, label="CI95 High")
+
+    last_price = closes[-1]
+    # نمایش آخرین قیمت روی نمودار
+    plt.text(len(closes[-100:]) - 1, last_price, f"${last_price:,.0f}", color="white")
+
+    plt.title(f"BTC Forecast (next {hours}h)", fontsize=14, color="white")
     plt.legend()
+    plt.grid(alpha=0.2)
+
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")
+    plt.savefig(buf, format="png", dpi=200, bbox_inches="tight")
     buf.seek(0)
     plt.close()
     return buf, None
