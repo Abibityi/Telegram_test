@@ -730,19 +730,19 @@ def send_predict_menu(chat_id):
         markup.row(*row)
     bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
     
-# ================== لیکوییدیشن‌ها ==================
-liq_list = []   # لیست 10 تایی لیکوییدیشن‌ها
-LIQ_THRESHOLD = 10  # برای تست 10 دلار (بعدا می‌کنی 1_000_000)
+# ================= لیکوئیدیشن‌ها ================= #
+liq_list = []   # ذخیره ۱۰ لیکوییدیشن آخر
+LIQ_THRESHOLD = 10   # برای تست ۱۰ دلار (بعدا بذار 1_000_000)
 
-# ================== لیکوییدیشن‌ها ==================
-liq_list = []   # لیست 10 تایی لیکوییدیشن‌ها
-LIQ_THRESHOLD = 10  # برای تست 10 دلار (بعدا می‌کنی 1_000_000)
+users = set()   # لیست همه کاربرای ربات برای ارسال خودکار
 
+# گرفتن دیتا از بایننس و بای‌بیت
 def fetch_liquidations():
     new_liqs = []
+
     try:
         # Binance
-        url_binance = "https://fapi.binance.com/futures/data/allForceOrders?symbol=BTCUSDT&limit=50"
+        url_binance = "https://fapi.binance.com/fapi/v1/allForceOrders?symbol=BTCUSDT&limit=50"
         r = requests.get(url_binance, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -770,7 +770,7 @@ def fetch_liquidations():
             result = r.json().get("result", {})
             data = result.get("list", [])
             for d in data:
-                qty = float(d.get("size", 0))
+                qty = float(d.get("qty", 0))
                 price = float(d.get("price", 0))
                 symbol = d.get("symbol")
                 side = d.get("side")
@@ -785,15 +785,49 @@ def fetch_liquidations():
     except Exception as e:
         print(f"[Bybit LIQ error] {e}")
 
+    return new_liqs
+
+# آپدیت لیست لیکوییدیشن‌ها
+def update_liq_list():
+    global liq_list
+    new_liqs = fetch_liquidations()
+    if new_liqs:
+        for liq in new_liqs:
+            liq_list.append(liq)
+            if len(liq_list) > 10:  # فقط ۱۰ تا نگه داره
+                liq_list.pop(0)
+        print("[+] لیست لیکوییدیشن‌ها آپدیت شد")
+    else:
+        print("[-] دیتای جدیدی پیدا نشد")
+
+# فرمت گزارش برای ارسال
 def format_liq_report():
     if not liq_list:
-        return "⏳ هنوز لیکویید مهمی ثبت نشده."
-    lines = []
-    for l in liq_list:
-        lines.append(
-            f"💥 {l['exchange']} | {l['symbol']} | {l['side']} | ${l['value']:,.0f}"
-        )
-    return "📊 *آخرین لیکوییدیشن‌ها:*\n" + "\n".join(lines)
+        return "❌ هنوز لیکوییدیشنی ثبت نشده."
+    report = "📊 آخرین لیکوییدیشن‌ها:\n\n"
+    for liq in liq_list:
+        report += f"📍 {liq['exchange']} | {liq['symbol']} | {liq['side']} | 💰 {liq['value']:.2f}$\n"
+    return report
+
+# دستور کاربر برای گزارش
+@bot.message_handler(commands=['liq'])
+def send_liq_report(message):
+    users.add(message.chat.id)   # ذخیره کاربر برای ارسال خودکار
+    report = format_liq_report()
+    bot.send_message(message.chat.id, report)
+
+# ارسال خودکار برای همه کاربرا هر ۴ ساعت
+def auto_send_liq_report():
+    report = format_liq_report()
+    for user in users:
+        try:
+            bot.send_message(user, f"⏰ گزارش خودکار لیکوییدیشن:\n\n{report}")
+        except Exception as e:
+            print(f"[AutoSend error] {e}")
+
+# زمان‌بندی آپدیت و ارسال خودکار
+schedule.every(4).hours.do(update_liq_list)
+schedule.every(4).hours.do(auto_send_liq_report)
 
 # دستور دستی
 @bot.message_handler(commands=['liqs'])
