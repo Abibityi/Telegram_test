@@ -229,7 +229,92 @@ def get_top10_report():
 
     except Exception as e:
         return f"⚠️ خطا در دریافت گزارش: {e}"
-        
+
+# ================== مانیتور لیکوییدیشن‌های بزرگ ==================
+liquidations_list = []  # ذخیره حداکثر 10 لیکوییدیشن
+subscribed_chats = set()  # همه‌ی کسایی که /start زدن
+
+def fetch_large_liqs():
+    """
+    دریافت لیکوییدیشن‌های بزرگ از بایننس فیوچرز (BTCUSDT).
+    فقط بالای 1M$ ذخیره می‌کنیم.
+    """
+    try:
+        url = "https://fapi.binance.com/futures/data/liquidationOrders"
+        params = {"limit": 50, "symbol": "BTCUSDT"}  # فقط بیت‌کوین
+        r = requests.get(url, params=params, timeout=10, headers=HEADERS)
+        r.raise_for_status()
+        data = r.json()
+
+        global liquidations_list
+        for item in data:
+            price = float(item.get("price", 0))
+            qty = float(item.get("origQty", 0))
+            side = item.get("side", "?")
+            usdt_val = price * qty
+
+            if usdt_val >= 1_000_000:  # فقط بالای یک میلیون
+                entry = f"🪙 {item.get('symbol','?')} | 💵 ${usdt_val:,.0f} | {side} @ {price:,.0f}"
+                if entry not in liquidations_list:
+                    liquidations_list.append(entry)
+                    # فقط 10 آیتم آخر نگه داریم
+                    if len(liquidations_list) > 10:
+                        liquidations_list.pop(0)
+
+    except Exception as e:
+        print(f"[Liquidations Error] {e}")
+
+def send_liqs_report():
+    """
+    هر ۴ ساعت لیست لیکوییدیشن‌ها رو برای همه چت‌های استارت شده می‌فرسته.
+    """
+    global liquidations_list
+    if not subscribed_chats:
+        return
+
+    if not liquidations_list:
+        text = "⏳ در ۴ ساعت اخیر لیکویید بالای ۱M$ ثبت نشد."
+    else:
+        text = "🔥 *لیست لیکوییدیشن‌های بزرگ (۴ ساعت اخیر)* 🔥\n\n" + "\n".join(liquidations_list)
+        liquidations_list = []  # بعد از ارسال خالی بشه
+
+    for chat_id in subscribed_chats:
+        send_message(chat_id, text)
+
+# زمان‌بندی: هر ۵ دقیقه برای ذخیره، هر ۴ ساعت برای ارسال
+def run_liquidation_scheduler():
+    schedule.every(5).minutes.do(fetch_large_liqs)
+    schedule.every(4).hours.do(send_liqs_report)
+
+threading.Thread(target=run_liquidation_scheduler, daemon=True).start()
+
+# ================== دستور /liqs ==================
+@bot.message_handler(commands=['liqs'])
+def liqs_cmd(message):
+    chat_id = message.chat.id
+    if not liquidations_list:
+        send_message(chat_id, "⏳ فعلاً هیچ لیکویید بالای ۱M$ در لیست نیست.")
+    else:
+        text = "🔥 *لیست لیکوییدیشن‌های بزرگ* 🔥\n\n" + "\n".join(liquidations_list)
+        send_message(chat_id, text)
+
+# ================== تغییر در /start ==================
+@bot.message_handler(commands=['start'])
+def start(message):
+    chat_id = message.chat.id
+    user_wallets.setdefault(chat_id, [])
+    user_intervals[chat_id] = 1
+    subscribed_chats.add(chat_id)   # اینجا همه استارت‌کننده‌ها ذخیره میشن
+    send_message(chat_id,
+        "سلام 👋\n"
+        "آدرس ولت‌هات رو بفرست تا برات مانیتور کنم.\n\n"
+        "📍 /stop → توقف مانیتورینگ\n"
+        "📍 /interval → تغییر بازه گزارش\n"
+        "📍 /top10 → گزارش ۱۰ ارز برتر\n"
+        "📍 /predict → پیش‌بینی بیت‌کوین\n"
+        "📍 /liqs → لیست لیکوییدیشن‌های بزرگ"
+    )
+
 # ================== منوها ==================
 def send_interval_menu(chat_id):
     """
