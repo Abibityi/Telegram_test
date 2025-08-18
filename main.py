@@ -734,11 +734,15 @@ def send_predict_menu(chat_id):
 liq_list = []   # لیست 10 تایی لیکوییدیشن‌ها
 LIQ_THRESHOLD = 10  # برای تست 10 دلار (بعدا می‌کنی 1_000_000)
 
+# ================== لیکوییدیشن‌ها ==================
+liq_list = []   # لیست 10 تایی لیکوییدیشن‌ها
+LIQ_THRESHOLD = 10  # برای تست 10 دلار (بعدا می‌کنی 1_000_000)
+
 def fetch_liquidations():
     new_liqs = []
     try:
         # Binance
-       url_binance = "https://fapi.binance.com/futures/data/allForceOrders?symbol=BTCUSDT&limit=50"
+        url_binance = "https://fapi.binance.com/futures/data/allForceOrders?symbol=BTCUSDT&limit=50"
         r = requests.get(url_binance, timeout=10)
         if r.status_code == 200:
             data = r.json()
@@ -760,7 +764,7 @@ def fetch_liquidations():
 
     try:
         # Bybit
-      url_bybit = "https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=50"
+        url_bybit = "https://api.bybit.com/v5/market/liquidation?category=linear&symbol=BTCUSDT&limit=50"
         r = requests.get(url_bybit, timeout=10)
         if r.status_code == 200:
             data = r.json().get("result", [])
@@ -779,6 +783,18 @@ def fetch_liquidations():
                     })
     except Exception as e:
         print(f"[Bybit LIQ error] {e}")
+
+    return new_liqs
+
+
+def update_liq_list():
+    global liq_list
+    new_data = fetch_liquidations()
+    for liq in new_data:
+        if len(liq_list) >= 10:
+            liq_list.pop(0)  # قدیمی‌ترین حذف بشه
+        liq_list.append(liq)
+        print(f"[NEW LIQ] {liq}")
 
     return new_liqs
 
