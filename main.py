@@ -17,47 +17,45 @@ import threading
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
-
-
 def check_wallet_on_hyper(wallet, retries=3):
     """بررسی اعتبار ورودی روی سایت Hyperliquid"""
     url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
+    
     for attempt in range(retries):
         try:
-            r = requests.get(url, timeout=5)
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            
+            # اگر status code 200 باشد و محتوای صفحه حاوی اطلاعات ولت باشد
             if r.status_code == 200:
-                return True
+                # بررسی می‌کنیم که صفحه خطای 404 ندهد و محتوای معقولی داشته باشد
+                if "portfolio" in r.text.lower() and "not found" not in r.text.lower():
+                    return True
+                return False
             elif r.status_code == 404:
                 return False
             else:
-                time.sleep(1)  # دوباره تست کن
-        except requests.RequestException:
-            time.sleep(1)  # دوباره تست کن
+                time.sleep(1)  # کمی صبر کرده و دوباره تلاش می‌کنیم
+                
+        except requests.RequestException as e:
+            print(f"Error checking wallet {wallet}: {e}")
+            time.sleep(1)  # در صورت خطا کمی صبر می‌کنیم
+            
     return False
 
 def validate_wallet_inputs(items):
     valid = []
     errors = []
 
-    eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
-
     for item in items:
         item = item.strip()
-        # Debug: نمایش نتیجه regex برای هر ورودی
-        print(f"[DEBUG] Input={item}, RegexMatch={bool(eth_pattern.fullmatch(item))}")
-
-        if eth_pattern.fullmatch(item):
-            if check_wallet_on_hyper(item):
-                valid.append(item)
-            else:
-                errors.append({
-                    "input": item,
-                    "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
-                })
+        
+        # ابتدا مستقیماً در HyperDash چک می‌کنیم
+        if check_wallet_on_hyper(item):
+            valid.append(item)
         else:
             errors.append({
                 "input": item,
-                "reason": "ساختار آدرس ولت باید دقیقاً 0x + 40 کاراکتر هگز باشد"
+                "reason": "ولت یافت نشد"
             })
 
     return valid, errors
