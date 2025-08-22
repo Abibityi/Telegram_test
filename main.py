@@ -1,41 +1,12 @@
 
 import re
 
-
-
-import re
-
 def split_inputs(text):
     """ورودی کاربر رو بر اساس خط جدا می‌کند"""
     return [line.strip() for line in text.split("\n") if line.strip()]
 
 def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
     """اعتبارسنجی فقط ولت اتریوم یا لینک هایپر لیکویید"""
-    valid = []
-    errors = []
-
-    for item in items:
-        item = item.strip()
-
-        # ✅ فقط ولت اتریوم: شروع با 0x + دقیقاً 40 کاراکتر hex
-        if re.fullmatch(r"0x[a-fA-F0-9]{40}", item):
-            valid.append(item)
-
-        # ✅ فقط لینک پروفایل هایپر لیکویید
-        elif item.startswith("https://app.hyperliquid.xyz/portfolio/"):
-            valid.append(item)
-
-        # ❌ هر چیز دیگه
-        else:
-            errors.append({
-                "input": item,
-                "reason": "فقط آدرس ولت اتریوم (0x...) یا لینک هایپر لیکویید معتبر است"
-            })
-
-    return valid, errors
-
-def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
-    """اعتبارسنجی آدرس‌های ولت (اتریوم) یا لینک‌های هایپر لیکویید"""
     valid = []
     errors = []
 
