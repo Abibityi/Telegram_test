@@ -1,3 +1,24 @@
+
+def split_inputs(text):
+    """ورودی کاربر رو بر اساس خط جدا می‌کند"""
+    return [line.strip() for line in text.split("\n") if line.strip()]
+
+def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
+    """اعتبارسنجی آدرس‌های ولت یا لینک هایپر لیکویید"""
+    valid = []
+    errors = []
+    for item in items:
+        if item.startswith("0x") and len(item) == 42:
+            valid.append(item)
+        elif "hyperliquid" in item.lower():
+            valid.append(item)
+        else:
+            errors.append({
+                "input": item,
+                "reason": "ساختار ولت یا لینک معتبر نیست"
+            })
+    return valid, errors
+
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 import time
 import schedule
@@ -870,29 +891,16 @@ def predict(message):
     chat_id = message.chat.id
     send_predict_menu(chat_id)
 
-def split_inputs(text):
-    return [line.strip() for line in text.split("\n") if line.strip()]
-
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def add_wallet(message):
     chat_id = message.chat.id
-    items = split_inputs(message.text)  # اینجا دیگه خطا نمی‌ده
-    valid, errors = validate_wallet_inputs(items, allowed_prefixes)
-
-    if valid:
-        msg = (
-            f"✅ {len(valid)} ولت معتبر اضافه شد:\n"
-            + "\n".join(valid)
-        )
-        send_message(chat_id, msg)
-    else:
-        send_message(chat_id, "❌ هیچ ولت معتبری پیدا نشد.")
-
-    if errors:
-        lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
-        bot.send_message(chat_id, "⚠️ ورودی نامعتبر:\n" + "\n".join(lines))
-
-
+    wallet = message.text.strip()
+    if not wallet or len(wallet) < 5:
+        send_message(chat_id, "❌ ولت نامعتبره.")
+        return
+    user_wallets.setdefault(chat_id, []).append(wallet)
+    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
+    
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
