@@ -888,10 +888,9 @@ def add_wallet(message):
         send_message(chat_id, "❌ هیچ ولت معتبری پیدا نشد.")
 
     if errors:
-        lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
-        bot.send_message(chat_id, "⚠️ ورودی نامعتبر:
-" + "
-".join(lines))
+    lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
+    bot.send_message(chat_id, "⚠️ ورودی نامعتبر:\n" + "\n".join(lines))
+
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
