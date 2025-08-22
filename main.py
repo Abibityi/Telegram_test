@@ -17,20 +17,53 @@ import threading
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
+
 def check_wallet_on_hyper(wallet, retries=3):
-    """بررسی اعتبار ورودی روی سایت Hyperliquid"""
-    url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
-    
+    """بررسی اعتبار آدرس روی Hyperliquid:
+    1) ابتدا API رسمی (clearinghouseState)
+    2) در صورت نیاز صفحه پورتفولیو به‌عنوان fallback
+    """
+    api_url = "https://api.hyperliquid.xyz/info"
+    page_url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
+    payload = {"type": "clearinghouseState", "user": wallet}
+
     for attempt in range(retries):
         try:
-            r = requests.get(url, headers=HEADERS, timeout=10)
-            
-            # اگر status code 200 باشد و محتوای صفحه حاوی اطلاعات ولت باشد
+            # --- مرحله ۱: API رسمی ---
+            r = requests.post(api_url, json=payload, headers=HEADERS, timeout=10)
             if r.status_code == 200:
-                # بررسی می‌کنیم که صفحه خطای 404 ندهد و محتوای معقولی داشته باشد
-                if "portfolio" in r.text.lower() and "not found" not in r.text.lower():
+                try:
+                    data = r.json()
+                    # اگر ساختار معقولی از پوزیشن‌ها/اطلاعات کاربر داد، معتبر فرض می‌کنیم
+                    if isinstance(data, dict) and any(k in data for k in ("assetPositions", "crossMarginSummary", "marginSummary", "withdrawalCaps")):
+                        logging.debug(f"[HL-API] {wallet} -> OK")
+                        return True
+                except Exception as je:
+                    logging.debug(f"[HL-API JSON ERROR] {wallet}: {je}")
+
+            # --- مرحله ۲: صفحه پورتفولیو ---
+            r2 = requests.get(page_url, headers=HEADERS, timeout=10)
+            if r2.status_code == 200:
+                txt = r2.text.lower()
+                if ("portfolio" in txt) and ("not found" not in txt) and (wallet.lower() in txt):
+                    logging.debug(f"[HL-PAGE] {wallet} -> OK")
                     return True
+                else:
+                    logging.debug(f"[HL-PAGE] {wallet} -> invalid content")
+                    return False
+            elif r2.status_code == 404:
+                logging.debug(f"[HL-PAGE] {wallet} -> 404")
                 return False
+
+            # اگر هیچکدوم واضح نبود، یک‌بار دیگه تلاش
+            time.sleep(1)
+
+        except requests.RequestException as e:
+            logging.debug(f"[HL-REQ ERROR] {wallet}: {e}")
+            time.sleep(1)
+
+    return False
+
             elif r.status_code == 404:
                 return False
             else:
@@ -932,8 +965,49 @@ def predict(message):
     chat_id = message.chat.id
     send_predict_menu(chat_id)
 
+
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def add_wallet(message):
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+
+    # چند ورودی را با فاصله/کاما/خط‌جدید جدا می‌کنیم
+    parts = re.split(r'[\s,]+', text)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    if not parts:
+        send_message(chat_id, "❌ لطفاً حداقل یک آدرس ولت بفرست.")
+        return
+
+    # استفاده از اعتبارسنجی سفت‌وسخت
+    valid, errors = validate_wallet_inputs(parts)
+
+    # افزودن موارد معتبر (بدون تکرار)
+    added = []
+    if valid:
+        user_wallets.setdefault(chat_id, [])
+        for w in valid:
+            if w not in user_wallets[chat_id]:
+                user_wallets[chat_id].append(w)
+                added.append(w)
+
+    # ساخت پیام خروجی
+    msg_lines = []
+    if added:
+        msg_lines.append(f"✅ {len(added)} ولت معتبر اضافه شد:")
+        msg_lines.extend([f"- `{w}`" for w in added])
+    if errors:
+        msg_lines.append("❌ موارد نامعتبر:")
+        for err in errors:
+            reason = err.get('reason', 'نامعتبر')
+            msg_lines.append(f"- `{err['input']}` → {reason}")
+
+    if not msg_lines:
+        msg_lines = ["⚠️ هیچ ولت جدیدی اضافه نشد."]
+
+    send_message(chat_id, "\n".join(msg_lines))
+
+:
     chat_id = message.chat.id
     wallet = message.text.strip()
     if not wallet or len(wallet) < 5:
