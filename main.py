@@ -20,6 +20,60 @@ if not API_TOKEN:
 
 bot = telebot.TeleBot(API_TOKEN)
 
+
+# ================== اعتبارسنجی آدرس‌ها ==================
+import re as _re_for_wallets
+ADDR_REGEX = _re_for_wallets.compile(r"0x[a-fA-F0-9]{40}")
+HYPERLIQUID_DOMAINS = {
+    "hyperliquid.xyz",
+    "www.hyperliquid.xyz",
+    "app.hyperliquid.xyz",
+}
+def _is_hyperliquid_domain(netloc: str) -> bool:
+    netloc = netloc.lower()
+    return netloc in HYPERLIQUID_DOMAINS or netloc.endswith(".hyperliquid.xyz")
+def _extract_addr_from_text(text: str):
+    return ADDR_REGEX.findall(text)
+def validate_wallet_inputs(raw_inputs, allow_raw_addresses=True):
+    valid = []
+    errors = []
+    seen = set()
+    for item in raw_inputs:
+        s = (item or "").strip()
+        if not s:
+            continue
+        if ADDR_REGEX.fullmatch(s):
+            if allow_raw_addresses:
+                if s.lower() not in seen:
+                    seen.add(s.lower())
+                    valid.append(s)
+            else:
+                errors.append({"input": s, "reason": "آدرس خام مجاز نیست"})
+            continue
+        if s.startswith("http://") or s.startswith("https://"):
+            try:
+                from urllib.parse import urlparse
+                p = urlparse(s)
+            except:
+                errors.append({"input": s, "reason": "URL نامعتبر"})
+                continue
+            if not _is_hyperliquid_domain(p.netloc):
+                errors.append({"input": s, "reason": "دامنه غیر Hyperliquid"})
+                continue
+            addrs = _extract_addr_from_text(s + p.path + p.query + p.fragment)
+            if not addrs:
+                errors.append({"input": s, "reason": "آدرس در URL یافت نشد"})
+                continue
+            for addr in addrs:
+                if addr.lower() not in seen:
+                    seen.add(addr.lower())
+                    valid.append(addr)
+            continue
+        errors.append({"input": s, "reason": "نه آدرس معتبر و نه URL Hyperliquid"})
+    return valid, errors
+def split_inputs(text: str):
+    parts = _re_for_wallets.split(r"[\s,;\n\r]+", text.strip())
+    return [p for p in parts if p]
 # برای هر کاربر یک لیست ولت ذخیره می‌کنیم
 user_wallets = {}
 previous_positions = {}   # کلید: (chat_id, wallet)
@@ -873,13 +927,23 @@ def predict(message):
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def add_wallet(message):
     chat_id = message.chat.id
-    wallet = message.text.strip()
-    if not wallet or len(wallet) < 5:
-        send_message(chat_id, "❌ ولت نامعتبره.")
-        return
-    user_wallets.setdefault(chat_id, []).append(wallet)
-    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-    
+    items = split_inputs(message.text)
+    valid, errors = validate_wallet_inputs(items, allow_raw_addresses=True)
+
+    if valid:
+        user_wallets.setdefault(chat_id, []).extend(valid)
+        send_message(chat_id, f"✅ {len(valid)} ولت معتبر اضافه شد:
+" + "
+".join(valid))
+    else:
+        send_message(chat_id, "❌ هیچ ولت معتبری پیدا نشد.")
+
+    if errors:
+        lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
+        bot.send_message(chat_id, "⚠️ ورودی نامعتبر:
+" + "
+".join(lines))
+
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
