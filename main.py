@@ -1,10 +1,23 @@
 
+
+
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+import time
+import schedule
+import telebot
+import threading
+import requests
+import os
+import math
+import matplotlib.pyplot as plt
+import io
+import websocket
+import json
+import threading
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
 
-
-import requests
-import time
 
 def check_wallet_on_hyper(wallet, retries=3):
     """بررسی اعتبار ورودی روی سایت Hyperliquid"""
@@ -26,35 +39,29 @@ def validate_wallet_inputs(items):
     valid = []
     errors = []
 
+    # الگوی دقیق: 0x + 40 کاراکتر hex (یعنی کل رشته باید دقیقاً 42 کاراکتر باشه)
+    eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
     for item in items:
         item = item.strip()
-        if check_wallet_on_hyper(item):
-            valid.append(item)
+
+        # فقط اگر الگو درست بود، بعدش بریم روی Hyperliquid تست کنیم
+        if eth_pattern.fullmatch(item):
+            if check_wallet_on_hyper(item):
+                valid.append(item)
+            else:
+                errors.append({
+                    "input": item,
+                    "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
+                })
         else:
             errors.append({
                 "input": item,
-                "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
+                "reason": "ساختار آدرس ولت باید دقیقاً 0x + 40 کاراکتر هگز باشد"
             })
 
     return valid, errors
-
-
-
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-import time
-import schedule
-import telebot
-import threading
-import requests
-import os
-import math
-import matplotlib.pyplot as plt
-import io
-import websocket
-import json
-import threading
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
 
 # ================== تنظیمات ==================
 API_TOKEN = os.environ.get("API_TOKEN")
