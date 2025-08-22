@@ -39,13 +39,13 @@ def validate_wallet_inputs(items):
     valid = []
     errors = []
 
-    # الگوی دقیق: 0x + 40 کاراکتر hex (یعنی کل رشته باید دقیقاً 42 کاراکتر باشه)
     eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
     for item in items:
         item = item.strip()
+        # Debug: نمایش نتیجه regex برای هر ورودی
+        print(f"[DEBUG] Input={item}, RegexMatch={bool(eth_pattern.fullmatch(item))}")
 
-        # فقط اگر الگو درست بود، بعدش بریم روی Hyperliquid تست کنیم
         if eth_pattern.fullmatch(item):
             if check_wallet_on_hyper(item):
                 valid.append(item)
