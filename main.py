@@ -877,9 +877,12 @@ def add_wallet(message):
     valid, errors = validate_wallet_inputs(items, allow_raw_addresses=True)
 
     if valid:
-        msg = f"✅ {len(valid)} ولت معتبر اضافه شد:
-" + "
-".join(valid)
+        msg = (
+    f"✅ {len(valid)} ولت معتبر اضافه شد:\n"
+    + "\n".join(valid)
+)
+
+
         send_message(chat_id, msg)
     else:
         send_message(chat_id, "❌ هیچ ولت معتبری پیدا نشد.")
