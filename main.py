@@ -1,23 +1,32 @@
 
-def split_inputs(text):
-    """ورودی کاربر رو بر اساس خط جدا می‌کند"""
-    return [line.strip() for line in text.split("\n") if line.strip()]
+import re
 
 def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
     """اعتبارسنجی آدرس‌های ولت یا لینک هایپر لیکویید"""
     valid = []
     errors = []
+
     for item in items:
-        if item.startswith("0x") and len(item) == 42:
+        # پاک کردن فاصله‌های اضافی
+        item = item.strip()
+
+        # ✅ ولت اتریوم (0x + 40 کاراکتر hex)
+        if re.fullmatch(r"0x[a-fA-F0-9]{40}", item):
             valid.append(item)
-        elif "hyperliquid" in item.lower():
+
+        # ✅ لینک هایپر لیکویید
+        elif item.startswith("https://app.hyperliquid.xyz/portfolio/"):
             valid.append(item)
+
+        # ❌ هرچیز دیگه
         else:
             errors.append({
                 "input": item,
-                "reason": "ساختار ولت یا لینک معتبر نیست"
+                "reason": "آدرس ولت یا لینک هایپر لیکویید معتبر نیست"
             })
+
     return valid, errors
+
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 import time
