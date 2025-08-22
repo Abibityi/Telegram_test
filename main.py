@@ -1,31 +1,29 @@
 
 import re
 
-def split_inputs(text):
-    """ورودی کاربر رو بر اساس خط جدا می‌کند"""
-    return [line.strip() for line in text.split("\n") if line.strip()]
-
-def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
-    """اعتبارسنجی فقط ولت اتریوم یا لینک هایپر لیکویید"""
+def validate_wallet_inputs(items):
     valid = []
     errors = []
+
+    # ✅ الگوی دقیق آدرس اتریوم (0x + دقیقا 40 کاراکتر hex)
+    eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
     for item in items:
         item = item.strip()
 
-        # ✅ فقط ولت اتریوم: شروع با 0x + دقیقاً 40 کاراکتر hex
-        if re.fullmatch(r"0x[a-fA-F0-9]{40}", item):
+        # ✅ چک آدرس ولت اتریوم
+        if eth_pattern.fullmatch(item):
             valid.append(item)
 
-        # ✅ فقط لینک پروفایل هایپر لیکویید
+        # ✅ چک لینک پروفایل هایپرلیکویید
         elif item.startswith("https://app.hyperliquid.xyz/portfolio/"):
             valid.append(item)
 
-        # ❌ هر چیز دیگه
+        # ❌ هر چیز دیگه غیرمعتبر
         else:
             errors.append({
                 "input": item,
-                "reason": "فقط آدرس ولت اتریوم (0x...) یا لینک هایپر لیکویید معتبر است"
+                "reason": "فقط آدرس ولت اتریوم (0x...) یا لینک هایپر لیکوئید معتبر است"
             })
 
     return valid, errors
