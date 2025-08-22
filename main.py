@@ -15,10 +15,9 @@ import threading
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
-
 def check_wallet_on_hyper(wallet, retries=3):
-    page_url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
-    for attempt in range(retries):
+    page_url = f"https://hypersite.io/address/{wallet}"  # آدرس رو درست کن به سایت اصلی
+    for _ in range(retries):
         try:
             r2 = requests.get(page_url, headers=HEADERS, timeout=10)
 
@@ -35,36 +34,16 @@ def check_wallet_on_hyper(wallet, retries=3):
                 logging.debug(f"[HL-PAGE] {wallet} -> 404")
                 return False
 
-            # اگر هیچکدوم نبود یه بار دیگه تلاش می‌کنیم
-            time.sleep(1)
-
-        except requests.RequestException as e:
-            logging.debug(f"[HL-REQ ERROR] {wallet}: {e}")
-            time.sleep(1)
-
-    return False
-
-            # اگه هیچکدوم نبود، دوباره تلاش می‌کنیم
-            time.sleep(1)
-
-        except requests.RequestException as e:
-            logging.debug(f"[HL-REQ ERROR] {wallet}: {e}")
-            time.sleep(1)
-
-    return False
-
-
-
-            elif r.status_code == 404:
-                return False
             else:
-                time.sleep(1)  # کمی صبر کرده و دوباره تلاش می‌کنیم
-                
+                # اگر هیچکدوم نبود، یک ثانیه صبر کن و دوباره تلاش کن
+                time.sleep(1)
+
         except requests.RequestException as e:
-            print(f"Error checking wallet {wallet}: {e}")
-            time.sleep(1)  # در صورت خطا کمی صبر می‌کنیم
-            
+            logging.debug(f"[HL-REQ ERROR] {wallet}: {e}")
+            time.sleep(1)
+
     return False
+
 
 def validate_wallet_inputs(items):
     import re
