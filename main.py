@@ -1,32 +1,50 @@
 
 import re
 
+
+
+import requests
+import time
+
+def check_wallet_on_hyper(wallet, retries=3):
+    """بررسی اعتبار ورودی روی سایت Hyperliquid"""
+    url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, timeout=5)
+            if r.status_code == 200:
+                return True
+            elif r.status_code == 404:
+                return False
+            else:
+                time.sleep(1)  # دوباره تست کن
+        except requests.RequestException:
+            time.sleep(1)  # دوباره تست کن
+    return False
+
 def validate_wallet_inputs(items):
     valid = []
     errors = []
 
-    # ✅ الگوی دقیق آدرس اتریوم (0x + دقیقا 40 کاراکتر hex)
-    eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
-
     for item in items:
         item = item.strip()
 
-        # ✅ چک آدرس ولت اتریوم
-        if eth_pattern.fullmatch(item):
+        if item.startswith("https://app.hyperliquid.xyz/portfolio/"):
+            # لینک مستقیم همیشه معتبر حساب بشه
             valid.append(item)
-
-        # ✅ چک لینک پروفایل هایپرلیکویید
-        elif item.startswith("https://app.hyperliquid.xyz/portfolio/"):
-            valid.append(item)
-
-        # ❌ هر چیز دیگه غیرمعتبر
         else:
-            errors.append({
-                "input": item,
-                "reason": "فقط آدرس ولت اتریوم (0x...) یا لینک هایپر لیکوئید معتبر است"
-            })
+            # هر ورودی دیگه بره تست بشه روی هایپر
+            if check_wallet_on_hyper(item):
+                valid.append(item)
+            else:
+                errors.append({
+                    "input": item,
+                    "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
+                })
 
     return valid, errors
+
+
 
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
