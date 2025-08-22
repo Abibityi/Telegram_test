@@ -43,19 +43,33 @@ def check_wallet_on_hyper(wallet, retries=3):
     return False
 
 def validate_wallet_inputs(items):
+    import re
+    import logging
+
     valid = []
     errors = []
 
+    eth_pattern = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
     for item in items:
         item = item.strip()
-        
-        # ابتدا مستقیماً در HyperDash چک می‌کنیم
+        logging.debug(f"[DEBUG] Input={item}, Length={len(item)}")
+
+        # مرحله 1: چک تعداد کاراکتر و ساختار
+        if not eth_pattern.fullmatch(item):
+            errors.append({
+                "input": item,
+                "reason": "ساختار آدرس ولت باید دقیقا 0x + 40 کاراکتر هگز باشد"
+            })
+            continue
+
+        # مرحله 2: تست روی سایت Hyperliquid
         if check_wallet_on_hyper(item):
             valid.append(item)
         else:
             errors.append({
                 "input": item,
-                "reason": "ولت یافت نشد"
+                "reason": "ولت روی هایپرلیکویید پیدا نشد"
             })
 
     return valid, errors
