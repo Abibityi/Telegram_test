@@ -873,23 +873,34 @@ def predict(message):
 @bot.message_handler(func=lambda m: True, content_types=['text'])
 def add_wallet(message):
     chat_id = message.chat.id
-    items = split_inputs(message.text)
-    valid, errors = validate_wallet_inputs(items, allow_raw_addresses=True)
 
+    # جدا کردن ورودی‌ها
+    items = split_inputs(message.text)
+    valid, errors = validate_wallet_inputs(items, allow_empty=False)
+
+    # 🟢 دیباگ (می‌تونی بعداً پاک کنی)
+    print("📥 ورودی خام:", message.text)
+    print("📦 بعد از split:", items)
+    print("✅ معتبر:", valid)
+    print("❌ نامعتبر:", errors)
+
+    # اگر ولت معتبر داریم
     if valid:
         msg = (
-    f"✅ {len(valid)} ولت معتبر اضافه شد:\n"
-    + "\n".join(valid)
-)
-
-
+            f"✅ {len(valid)} ولت معتبر اضافه شد:\n"
+            + "\n".join(valid)
+        )
         send_message(chat_id, msg)
     else:
         send_message(chat_id, "❌ هیچ ولت معتبری پیدا نشد.")
 
+    # اگر خطا وجود داشت
     if errors:
-       lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
-       bot.send_message(chat_id, "⚠️ ورودی نامعتبر:\n" + "\n".join(lines))
+        lines = [f"❌ {e['input']} → {e['reason']}" for e in errors]
+        bot.send_message(
+            chat_id,
+            "⚠️ لیست ورودی‌های نامعتبر:\n" + "\n".join(lines)
+        )
 
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
