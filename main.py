@@ -19,33 +19,13 @@ import re
 
 
 def check_wallet_on_hyper(wallet, retries=3):
-    """بررسی اعتبار آدرس روی Hyperliquid:
-    1) ابتدا API رسمی (clearinghouseState)
-    2) در صورت نیاز صفحه پورتفولیو به‌عنوان fallback
-    """
-    api_url = "https://api.hyperliquid.xyz/info"
     page_url = f"https://app.hyperliquid.xyz/portfolio/{wallet}"
-    payload = {"type": "clearinghouseState", "user": wallet}
-
-    for attempt in range(retries):
+    for _ in range(retries):
         try:
-            # --- مرحله ۱: API رسمی ---
-            r = requests.post(api_url, json=payload, headers=HEADERS, timeout=10)
-            if r.status_code == 200:
-                try:
-                    data = r.json()
-                    # اگر ساختار معقولی از پوزیشن‌ها/اطلاعات کاربر داد، معتبر فرض می‌کنیم
-                    if isinstance(data, dict) and any(k in data for k in ("assetPositions", "crossMarginSummary", "marginSummary", "withdrawalCaps")):
-                        logging.debug(f"[HL-API] {wallet} -> OK")
-                        return True
-                except Exception as je:
-                    logging.debug(f"[HL-API JSON ERROR] {wallet}: {je}")
-
-            # --- مرحله ۲: صفحه پورتفولیو ---
             r2 = requests.get(page_url, headers=HEADERS, timeout=10)
             if r2.status_code == 200:
                 txt = r2.text.lower()
-                if ("portfolio" in txt) and ("not found" not in txt) and (wallet.lower() in txt):
+                if "portfolio" in txt and "not found" not in txt:
                     logging.debug(f"[HL-PAGE] {wallet} -> OK")
                     return True
                 else:
@@ -55,7 +35,7 @@ def check_wallet_on_hyper(wallet, retries=3):
                 logging.debug(f"[HL-PAGE] {wallet} -> 404")
                 return False
 
-            # اگر هیچکدوم واضح نبود، یک‌بار دیگه تلاش
+            # اگه هیچکدوم نبود، دوباره تلاش می‌کنیم
             time.sleep(1)
 
         except requests.RequestException as e:
@@ -63,6 +43,8 @@ def check_wallet_on_hyper(wallet, retries=3):
             time.sleep(1)
 
     return False
+
+
 
             elif r.status_code == 404:
                 return False
