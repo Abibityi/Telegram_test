@@ -2,27 +2,26 @@
 import re
 
 def validate_wallet_inputs(items, allowed_prefixes=None, allow_empty=False):
-    """اعتبارسنجی آدرس‌های ولت یا لینک هایپر لیکویید"""
+    """اعتبارسنجی آدرس‌های ولت (اتریوم) یا لینک‌های هایپر لیکویید"""
     valid = []
     errors = []
 
     for item in items:
-        # پاک کردن فاصله‌های اضافی
         item = item.strip()
 
-        # ✅ ولت اتریوم (0x + 40 کاراکتر hex)
+        # ✅ فقط ولت اتریوم: شروع با 0x + دقیقاً 40 کاراکتر hex
         if re.fullmatch(r"0x[a-fA-F0-9]{40}", item):
             valid.append(item)
 
-        # ✅ لینک هایپر لیکویید
+        # ✅ فقط لینک پروفایل هایپر لیکویید
         elif item.startswith("https://app.hyperliquid.xyz/portfolio/"):
             valid.append(item)
 
-        # ❌ هرچیز دیگه
+        # ❌ هر چیز دیگه
         else:
             errors.append({
                 "input": item,
-                "reason": "آدرس ولت یا لینک هایپر لیکویید معتبر نیست"
+                "reason": "فقط آدرس ولت اتریوم (0x...) یا لینک هایپر لیکویید معتبر است"
             })
 
     return valid, errors
