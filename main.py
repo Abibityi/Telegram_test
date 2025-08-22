@@ -28,19 +28,13 @@ def validate_wallet_inputs(items):
 
     for item in items:
         item = item.strip()
-
-        if item.startswith("https://app.hyperliquid.xyz/portfolio/"):
-            # لینک مستقیم همیشه معتبر حساب بشه
+        if check_wallet_on_hyper(item):
             valid.append(item)
         else:
-            # هر ورودی دیگه بره تست بشه روی هایپر
-            if check_wallet_on_hyper(item):
-                valid.append(item)
-            else:
-                errors.append({
-                    "input": item,
-                    "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
-                })
+            errors.append({
+                "input": item,
+                "reason": "ولت روی هایپرلیکویید پیدا نشد یا معتبر نیست"
+            })
 
     return valid, errors
 
