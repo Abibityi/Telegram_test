@@ -16,7 +16,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
 def check_wallet_on_hyper(wallet, retries=3):
-    page_url = f"https://hypersite.io/address/{wallet}"  # آدرس رو درست کن به سایت اصلی
+    page_url = f"https://hyperdash.info/address/{wallet}"  # آدرس رو درست کن به سایت اصلی
     for _ in range(retries):
         try:
             r2 = requests.get(page_url, headers=HEADERS, timeout=10)
