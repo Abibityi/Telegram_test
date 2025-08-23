@@ -15,34 +15,6 @@ import threading
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 
-def check_wallet_on_hyper(wallet, retries=3):
-    page_url = f"https://stats-data.hyperliquid.xyz/Mainnet/leaderboard{wallet}"  # آدرس رو درست کن به سایت اصلی
-    for _ in range(retries):
-        try:
-            r2 = requests.get(page_url, headers=HEADERS, timeout=10)
-
-            if r2.status_code == 200:
-                txt = r2.text.lower()
-                if "portfolio" in txt and "not found" not in txt:
-                    logging.debug(f"[HL-PAGE] {wallet} -> OK")
-                    return True
-                else:
-                    logging.debug(f"[HL-PAGE] {wallet} -> invalid content")
-                    return False
-
-            elif r2.status_code == 404:
-                logging.debug(f"[HL-PAGE] {wallet} -> 404")
-                return False
-
-            else:
-                # اگر هیچکدوم نبود، یک ثانیه صبر کن و دوباره تلاش کن
-                time.sleep(1)
-
-        except requests.RequestException as e:
-            logging.debug(f"[HL-REQ ERROR] {wallet}: {e}")
-            time.sleep(1)
-
-    return False
 
 
 def validate_wallet_inputs(items):
