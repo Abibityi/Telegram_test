@@ -26,6 +26,7 @@ def validate_wallet_inputs(items):
 
     for item in items:
         item = item.strip()
+
         if not eth_pattern.fullmatch(item):
             errors.append({
                 "input": item,
@@ -33,6 +34,7 @@ def validate_wallet_inputs(items):
             })
             continue
 
+        # فقط regex چک می‌شود
         valid.append(item)
 
     return valid, errors
@@ -937,15 +939,6 @@ def add_wallet(message):
 
     send_message(chat_id, "\n".join(msg_lines))
 
-
-    chat_id = message.chat.id
-    wallet = message.text.strip()
-    if not wallet or len(wallet) < 5:
-        send_message(chat_id, "❌ ولت نامعتبره.")
-        return
-    user_wallets.setdefault(chat_id, []).append(wallet)
-    send_message(chat_id, f"✅ ولت `{wallet}` اضافه شد و مانیتورینگ شروع شد.")
-    
 # ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
@@ -999,23 +992,3 @@ if __name__ == "__main__":
     run_ws_thread()         # 🔹 وب‌سوکت بایننس راه میفته
     print("🚀 Bot started...")
     bot.infinity_polling()
-
-
-
-# ================== هندلر اضافه‌کردن ولت (اصلاح‌شده نهایی) ==================
-@bot.message_handler(func=lambda m: True)
-def handle_wallet_input(message):
-    chat_id = message.chat.id
-    text = message.text.strip()
-
-    valid, errors = validate_wallet_inputs([text])
-
-    if valid:
-        if chat_id not in user_wallets:
-            user_wallets[chat_id] = []
-        user_wallets[chat_id].extend(valid)
-        bot.send_message(chat_id, f"✅ ولت {valid[0]} اضافه شد و مانیتورینگ شروع شد.")
-    else:
-        err_lines = [f"- {e['input']} → {e['reason']}" for e in errors]
-        bot.send_message(chat_id, "❌ موارد نامعتبر:\n" + "\n".join(err_lines))
- 
