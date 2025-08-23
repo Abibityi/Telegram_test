@@ -977,7 +977,7 @@ def add_wallet(message):
 
     send_message(chat_id, "\n".join(msg_lines))
 
-:
+
     chat_id = message.chat.id
     wallet = message.text.strip()
     if not wallet or len(wallet) < 5:
