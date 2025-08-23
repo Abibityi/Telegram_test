@@ -1002,7 +1002,7 @@ if __name__ == "__main__":
 
 
 
-# ================== هندلر اضافه‌کردن ولت (اصلاح‌شده) ==================
+# ================== هندلر اضافه‌کردن ولت (اصلاح‌شده نهایی) ==================
 @bot.message_handler(func=lambda m: True)
 def handle_wallet_input(message):
     chat_id = message.chat.id
@@ -1018,3 +1018,4 @@ def handle_wallet_input(message):
     else:
         err_lines = [f"- {e['input']} → {e['reason']}" for e in errors]
         bot.send_message(chat_id, "❌ موارد نامعتبر:\n" + "\n".join(err_lines))
+ 
