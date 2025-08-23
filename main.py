@@ -19,8 +19,6 @@ import re
 
 def validate_wallet_inputs(items):
     import re
-    import logging
-
     valid = []
     errors = []
 
@@ -28,9 +26,6 @@ def validate_wallet_inputs(items):
 
     for item in items:
         item = item.strip()
-        logging.debug(f"[DEBUG] Input={item}, Length={len(item)}")
-
-        # مرحله 1: چک تعداد کاراکتر و ساختار
         if not eth_pattern.fullmatch(item):
             errors.append({
                 "input": item,
@@ -38,16 +33,11 @@ def validate_wallet_inputs(items):
             })
             continue
 
-        # مرحله 2: تست روی سایت Hyperliquid
-        if check_wallet_on_hyper(item):
-            valid.append(item)
-        else:
-            errors.append({
-                "input": item,
-                "reason": "ولت روی هایپرلیکویید پیدا نشد"
-            })
+        # ✅ فقط regex → هیچ تست دیگه‌ای انجام نمیشه
+        valid.append(item)
 
     return valid, errors
+
     
 
 # ================== تنظیمات ==================
