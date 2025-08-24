@@ -30,26 +30,26 @@ def validate_wallet_inputs(items):
         if not eth_pattern.fullmatch(item):
             errors.append({
                 "input": item,
-                "reason": "Ø³Ø§Ø®ØªØ§Ø± Address ÙˆÙ„Øª Ø¨Ø§ÛŒØ¯ Ø¯Ù‚ÛŒÙ‚Ø§ 0x + 40 Ú©Ø§Ø±Ø§Ú©ØªØ± Ù‡Ú¯Ø² Ø¨Ø§Ø´Ø¯"
+                "reason": "ساختار آدرس ولت باید دقیقا 0x + 40 کاراکتر هگز باشد"
             })
             continue
 
-        # ÙÙ‚Ø· regex Ú†Ú© Ù…ÛŒâ€ŒØ´ÙˆØ¯
+        # فقط regex چک می‌شود
         valid.append(item)
 
     return valid, errors
     
 
-# ================== Settings ==================
+# ================== تنظیمات ==================
 API_TOKEN = os.environ.get("API_TOKEN")
 if not API_TOKEN:
-    raise SystemExit("âŒ API_TOKEN Ø¯Ø± Ù…ØªØºÛŒØ±Ù‡Ø§ÛŒ Ù…Ø­ÛŒØ·ÛŒ ØªÙ†Ø¸ÛŒÙ… Ù†Ø´Ø¯Ù‡")
+    raise SystemExit("❌ API_TOKEN در متغیرهای محیطی تنظیم نشده")
 
 bot = telebot.TeleBot(API_TOKEN)
 
-# Ø¨Ø±Ø§ÛŒ Ù‡Ø± User ÛŒÚ© Ù„ÛŒØ³Øª ÙˆÙ„Øª Ø°Ø®ÛŒØ±Ù‡ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…
+# برای هر کاربر یک لیست ولت ذخیره می‌کنیم
 user_wallets = {}
-previous_positions = {}   # Ú©Ù„ÛŒØ¯: (chat_id, wallet)
+previous_positions = {}   # کلید: (chat_id, wallet)
 user_intervals = {}
 
 def _safe_float(x, default=0.0):
@@ -61,11 +61,11 @@ def _safe_float(x, default=0.0):
 def _sign_fmt(x):
     v = _safe_float(x, 0.0)
     if v >= 0:
-        return f"âœ… +{v:,.2f}"
+        return f"✅ +{v:,.2f}"
     else:
-        return f"ðŸ”´ {v:,.2f}"
+        return f"🔴 {v:,.2f}"
         
-# ---------- Ù†Ø±Ù…Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Dataâ€ŒÙ‡Ø§ÛŒ HyperDash ----------
+# ---------- نرمال‌سازی داده‌های HyperDash ----------
 def _normalize_from_hyperdash(raw):
     out = []
     items = raw if isinstance(raw, list) else []
@@ -94,7 +94,7 @@ def _normalize_from_hyperdash(raw):
             })
     return out
 
-# ---------- Ù†Ø±Ù…Ø§Ù„â€ŒØ³Ø§Ø²ÛŒ Dataâ€ŒÙ‡Ø§ÛŒ Hyperliquid ----------
+# ---------- نرمال‌سازی داده‌های Hyperliquid ----------
 def _normalize_from_hyperliquid(raw):
     out = []
     items = raw.get("assetPositions", []) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
@@ -122,7 +122,7 @@ def _normalize_from_hyperliquid(raw):
             continue
     return out
     
-# ---------- Ø¯Ø±ÛŒØ§ÙØª Positionâ€ŒÙ‡Ø§ ----------
+# ---------- دریافت پوزیشن‌ها ----------
 def get_positions(wallet):
     headers = {"User-Agent": "Mozilla/5.0"}  
 
@@ -147,16 +147,16 @@ def get_positions(wallet):
 
     return []
 
-# ---------- ÙØ±Ù…Øª Ù¾ÛŒØ§Ù… ----------
+# ---------- فرمت پیام ----------
 def format_position_line(p):
     lines = [
-        f"ðŸª™ *{p.get('pair','?')}* | {('ðŸŸ¢ LONG' if p.get('side')=='LONG' else 'ðŸ”´ SHORT')}",
-        f"ðŸ”¢ Size: {p.get('size','?')}",
-        f"ðŸŽ¯ Entry: {p.get('entryPrice','?')}",
+        f"🪙 *{p.get('pair','?')}* | {('🟢 LONG' if p.get('side')=='LONG' else '🔴 SHORT')}",
+        f"🔢 Size: {p.get('size','?')}",
+        f"🎯 Entry: {p.get('entryPrice','?')}",
     ]
     if p.get("markPrice") is not None:
-        lines.append(f"ðŸ“ Mark: {p.get('markPrice')}")
-    lines.append(f"ðŸ’µ PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
+        lines.append(f"📍 Mark: {p.get('markPrice')}")
+    lines.append(f"💵 PNL: {_sign_fmt(p.get('unrealizedPnl'))}")
     return "\n".join(lines)
 
 def send_message(chat_id, text):
@@ -166,7 +166,7 @@ def send_message(chat_id, text):
         print(f"[SendMessage Error] {e}")
         
         
-# ================== Ù…Ø§Ù†ÛŒØªÙˆØ±ÛŒÙ†Ú¯ Ù„Ø­Ø¸Ù‡â€ŒØ§ÛŒ + Report Intervalâ€ŒØ§ÛŒ ==================
+# ================== مانیتورینگ لحظه‌ای + گزارش دوره‌ای ==================
 def check_positions():
     for chat_id, wallets in user_wallets.items():
         for wallet in wallets:
@@ -176,30 +176,30 @@ def check_positions():
             current_map = {p["uid"]: p for p in current_positions}
             prev_map    = {p["uid"]: p for p in prev_positions}
 
-            # Position Ø¬Ø¯ÛŒØ¯
+            # پوزیشن جدید
             for uid, pos in current_map.items():
                 if uid not in prev_map:
                     msg = (
-                        "ðŸš€ *Position Opened*\n"
-                        f"ðŸ’¼ (`{wallet}`)\n"
-                        "â”â”â”â”â”â”â”â”â”â”\n"
+                        "🚀 *Position Opened*\n"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
                         f"{format_position_line(pos)}"
                     )
                     send_message(chat_id, msg)
 
-            # Position Ø¨Ø³ØªÙ‡
+            # پوزیشن بسته
             for uid, pos in prev_map.items():
                 if uid not in current_map:
                     msg = (
-                        "âœ… *Position Closed*\n"
-                        f"ðŸ’¼ (`{wallet}`)\n"
-                        "â”â”â”â”â”â”â”â”â”â”\n"
-                        f"ðŸª™ *{pos.get('pair','?')}* | "
-                        f"{('ðŸŸ¢ LONG' if pos.get('side')=='LONG' else 'ðŸ”´ SHORT')}\n"
-                        f"ðŸ”¢ Size: {pos.get('size')}\n"
-                        f"ðŸŽ¯ Entry: {pos.get('entryPrice')}\n"
-                        f"ðŸ’µ Final PNL: {_sign_fmt(pos.get('unrealizedPnl',0))}\n"
-                        "ðŸ”š Position Position closed."
+                        "✅ *Position Closed*\n"
+                        f"💼 (`{wallet}`)\n"
+                        "━━━━━━━━━━\n"
+                        f"🪙 *{pos.get('pair','?')}* | "
+                        f"{('🟢 LONG' if pos.get('side')=='LONG' else '🔴 SHORT')}\n"
+                        f"🔢 Size: {pos.get('size')}\n"
+                        f"🎯 Entry: {pos.get('entryPrice')}\n"
+                        f"💵 Final PNL: {_sign_fmt(pos.get('unrealizedPnl',0))}\n"
+                        "🔚 پوزیشن بسته شد."
                     )
                     send_message(chat_id, msg)
 
@@ -214,14 +214,14 @@ def periodic_report():
 
         for wallet in wallets:
             current_positions = get_positions(wallet)
-            header = f"ðŸ•’ *Periodic Report ({interval} min)*\nðŸ’¼ (`{wallet}`)\nâ”â”â”â”â”â”â”â”â”â”"
+            header = f"🕒 *Periodic Report ({interval} min)*\n💼 (`{wallet}`)\n━━━━━━━━━━"
             if current_positions:
                 body = "\n\n".join([format_position_line(p) for p in current_positions])
                 send_message(chat_id, f"{header}\n{body}")
             else:
-                send_message(chat_id, f"{header}\nâ³ Ù‡ÛŒÚ† PositionÛŒ No open positions.")
+                send_message(chat_id, f"{header}\n⏳ هیچ پوزیشنی باز نیست.")
                 
-# ================== Report Û±Û° Ø§Ø±Ø² Ø¨Ø±ØªØ± ==================
+# ================== گزارش ۱۰ ارز برتر ==================
 def get_top10_report():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -249,57 +249,57 @@ def get_top10_report():
                 print(f"[Binance] error for {symbol}: {e}")
 
             lines.append(
-                f"ðŸª™ *{symbol}*\n"
-                f"ðŸ’µ ${price:,.2f} ({change:+.2f}%)\n"
-                f"ðŸ“Š Binance: ðŸŸ¢ {bin_long} | ðŸ”´ {bin_short}\n"
-                "â”â”â”â”â”â”â”â”â”â”"
+                f"🪙 *{symbol}*\n"
+                f"💵 ${price:,.2f} ({change:+.2f}%)\n"
+                f"📊 Binance: 🟢 {bin_long} | 🔴 {bin_short}\n"
+                "━━━━━━━━━━"
             )
 
-        return "ðŸ“Š *Top 10 Coins by Market Cap*\n\n" + "\n".join(lines)
+        return "📊 *Top 10 Coins by Market Cap*\n\n" + "\n".join(lines)
 
     except Exception as e:
-        return f"âš ï¸ Error Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Report: {e}"
+        return f"⚠️ خطا در دریافت گزارش: {e}"
         
-# ================== Ù…Ù†ÙˆÙ‡Ø§ ==================
+# ================== منوها ==================
 def send_interval_menu(chat_id):
     """
-    âœ… ÙÙ‚Ø· ØªÙ†Ø¸ÛŒÙ… Ø¨Ø§Ø²Ù‡ Report Intervalâ€ŒØ§ÛŒ
-    (Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ 'Prediction' Ùˆ 'ØªØ§Ù¾Û±Û°' Ø§Ø² Ø§ÛŒÙ† Ù…Ù†Ùˆ Ø­Ø°Ù Ø´Ø¯Ù†Ø¯)
+    ✅ فقط تنظیم بازه گزارش دوره‌ای
+    (دکمه‌های 'پیش‌بینی' و 'تاپ۱۰' از این منو حذف شدند)
     """
     markup = InlineKeyboardMarkup()
     options = [
-        ("1 Ø¯Ù‚ÛŒÙ‚Ù‡", 1),
-        ("15 Ø¯Ù‚ÛŒÙ‚Ù‡", 15),
-        ("30 Ø¯Ù‚ÛŒÙ‚Ù‡", 30),
-        ("4 Ø³Ø§Ø¹Øª", 240),
-        ("24 Ø³Ø§Ø¹Øª", 1440),
+        ("1 دقیقه", 1),
+        ("15 دقیقه", 15),
+        ("30 دقیقه", 30),
+        ("4 ساعت", 240),
+        ("24 ساعت", 1440),
     ]
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    bot.send_message(chat_id, "â± Ø¨Ø§Ø²Ù‡ Report Ø±Ùˆ Select Ú©Ù†:", reply_markup=markup)
+    bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 def send_predict_menu(chat_id):
     """
-    âœ… Ù…Ù†ÙˆÛŒ Select Ø¨Ø§Ø²Ù‡ Prediction BTC
-    Ø§Ø² Ø·Ø±ÛŒÙ‚ /predict Ø¨Ø§Ø² Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+    ✅ منوی انتخاب بازه پیش‌بینی BTC
+    از طریق /predict باز می‌شود.
     """
     markup = InlineKeyboardMarkup()
     hour_opts = [1, 2, 4, 8, 12, 24]
     row = []
     for h in hour_opts:
-        row.append(InlineKeyboardButton(f"{h} Ø³Ø§Ø¹Øª", callback_data=f"predict_h_{h}"))
+        row.append(InlineKeyboardButton(f"{h} ساعت", callback_data=f"predict_h_{h}"))
         if len(row) == 3:
             markup.row(*row)
             row = []
     if row:
         markup.row(*row)
-    bot.send_message(chat_id, "ðŸ”® Ø¨Ø§Ø²Ù‡ Prediction BTC Ø±Ùˆ Select Ú©Ù†:", reply_markup=markup)
+    bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
     
-# ================== Prediction BTC (Ø¨Ù‡Ø¨ÙˆØ¯ Ø¯Ù‚Øª + Strategyâ€ŒÙ‡Ø§ÛŒ Ø¨ÛŒØ´ØªØ±) ==================
+# ================== پیش‌بینی BTC (بهبود دقت + استراتژی‌های بیشتر) ==================
 import matplotlib.pyplot as plt
 import io
 
-# -------- IndicatorÙ‡Ø§ÛŒ Ù¾Ø§ÛŒÙ‡ --------
+# -------- اندیکاتورهای پایه --------
 def _ema(values, span):
     if not values:
         return 0.0
@@ -374,7 +374,7 @@ def _bb_width(values, window=20, k=2.0):
     width = (upper - lower) / m if m else 0.0
     return width, upper, m, lower
 
-# -------- Ø¯Ø±ÛŒØ§ÙØª Dataâ€ŒÙ‡Ø§ÛŒ OHLCV (Ø¨Ø±Ø§ÛŒ Strategyâ€ŒÙ‡Ø§) --------
+# -------- دریافت داده‌های OHLCV (برای استراتژی‌ها) --------
 def _fetch_binance_ohlcv(symbol="BTCUSDT", interval="5m", limit=500):
     url = "https://api.binance.com/api/v3/klines"
     params = {"symbol": symbol, "interval": interval, "limit": limit}
@@ -405,11 +405,11 @@ def _fetch_kraken_ohlcv(pair="XBTUSDT", interval=60):
     vols   = [float(c[6]) for c in ohlc]
     return times, opens, highs, lows, closes, vols
 
-# -------- Strategyâ€ŒÙ‡Ø§ÛŒ Ø¬Ø¯ÛŒØ¯ --------
+# -------- استراتژی‌های جدید --------
 def _stoch_rsi(values, period=14, k=3, d=3):
     if len(values) < period + 1:
         return 50.0, 50.0
-    # Ù…Ø­Ø§Ø³Ø¨Ù‡ RSI Ø±ÙˆÙ„ÛŒÙ†Ú¯
+    # محاسبه RSI رولینگ
     rsi_list = []
     for i in range(period, len(values)):
         rsi_list.append(_rsi(values[i-period:i], period))
@@ -420,7 +420,7 @@ def _stoch_rsi(values, period=14, k=3, d=3):
     if mx - mn == 0:
         return 50.0, 50.0
     stoch = (rsi_list[-1] - mn) / (mx - mn) * 100.0
-    # %K Ùˆ %D Ø³Ø§Ø¯Ù‡
+    # %K و %D ساده
     k_val = sum(rsi_list[-k:]) / max(1, min(k, len(rsi_list)))
     d_val = sum(rsi_list[-d:]) / max(1, min(d, len(rsi_list)))
     return stoch, d_val
@@ -441,7 +441,7 @@ def _atr(highs, lows, closes, period=14):
 def _ichimoku(highs, lows, closes):
     # Tenkan (9), Kijun (26), Senkou A/B (26-shifted)
     if len(closes) < 52:
-        # Ø­Ø¯Ø§Ù‚Ù„ Ø¨Ø±Ø§ÛŒ Ù…Ø­Ø§Ø³Ø¨Ù‡ Ø§Ø¨Ø±
+        # حداقل برای محاسبه ابر
         return None
     def hl_mid(arr_h, arr_l, p):
         hh = max(arr_h[-p:])
@@ -471,26 +471,26 @@ def _vwap(highs, lows, closes, vols):
         cum_v  += v
     return (cum_pv / cum_v) if cum_v else None
 
-# -------- Ø¯Ø±ÛŒØ§ÙØª Data Ùˆ Ù…Ø¯Ù„ Ø¢Ù…Ø§Ø±ÛŒ Ù¾Ø§ÛŒÙ‡ + Strategyâ€ŒÙ‡Ø§ --------
+# -------- دریافت داده و مدل آماری پایه + استراتژی‌ها --------
 def predict_btc_price(hours_ahead=4):
-    # Ø³Ø¹ÛŒ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ø§Ø² Ø¨Ø§ÛŒÙ†Ù†Ø³ Ø¨Ø§ ØªØ§ÛŒÙ…â€ŒÙØ±ÛŒÙ… 5m Ø¨Ø®ÙˆØ§Ù†ÛŒÙ…Ø› Ø¯Ø± ØµÙˆØ±Øª Error â†’ Ú©Ø±ÙŽÚ©Ù† Ø¨Ø§ 1h
+    # سعی می‌کنیم از بایننس با تایم‌فریم 5m بخوانیم؛ در صورت خطا → کرَکن با 1h
     use_step = 5
     try:
         times, opens, highs, lows, closes, vols = _fetch_binance_ohlcv("BTCUSDT", "5m", 500)
         source = "Binance (5m)"
         use_step = 5
     except Exception as e:
-        print(f"[Binance Error] {e} â†’ fallback Ø¨Ù‡ Kraken")
+        print(f"[Binance Error] {e} → fallback به Kraken")
         times, opens, highs, lows, closes, vols = _fetch_kraken_ohlcv("XBTUSDT", interval=60)
         source = "Kraken (1h)"
         use_step = 60
 
     if len(closes) < 60:
-        return {"error": "Dataâ€ŒÙ‡Ø§ÛŒ Ú©Ø§ÙÛŒ Ø¨Ø±Ø§ÛŒ Prediction ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯."}
+        return {"error": "داده‌های کافی برای پیش‌بینی وجود ندارد."}
 
     last_price = closes[-1]
 
-    # Ø¨Ø§Ø²Ø¯Ù‡ Ù„Ú¯Ø§Ø±ÛŒØªÙ…ÛŒ
+    # بازده لگاریتمی
     rets = []
     for i in range(1, len(closes)):
         c0, c1 = closes[i-1], closes[i]
@@ -498,16 +498,16 @@ def predict_btc_price(hours_ahead=4):
             continue
         rets.append(math.log(c1 / c0))
     if not rets:
-        return {"error": "Ø¹Ø¯Ù… Ø§Ù…Ú©Ø§Ù† Ù…Ø­Ø§Ø³Ø¨Ù‡ Ø¨Ø§Ø²Ø¯Ù‡â€ŒÙ‡Ø§."}
+        return {"error": "عدم امکان محاسبه بازده‌ها."}
 
-    # mu Ùˆ sigma
+    # mu و sigma
     window = min(200, len(rets))
     r_win = rets[-window:]
     mu = sum(r_win) / len(r_win)
     var = sum((x - mu)**2 for x in r_win) / max(1, len(r_win) - 1)
     sigma = math.sqrt(var)
 
-    # IndicatorÙ‡Ø§ÛŒ Ù¾Ø§ÛŒÙ‡
+    # اندیکاتورهای پایه
     ema_fast = _ema(closes, 12)
     ema_slow = _ema(closes, 26)
     trend = (ema_fast - ema_slow) / ema_slow if ema_slow else 0.0
@@ -515,7 +515,7 @@ def predict_btc_price(hours_ahead=4):
     macd, macd_sig, macd_hist = _macd(closes)
     bb_w, bb_up, bb_mid, bb_low = _bb_width(closes, 20)
 
-    # Ù†ÙˆØ³Ø§Ù† Ú©ÙˆØªØ§Ù‡
+    # نوسان کوتاه
     short_win = min(30, len(r_win))
     short_sigma = _std(r_win, short_win) if short_win >= 2 else sigma
     if short_sigma == 0:
@@ -546,105 +546,105 @@ def predict_btc_price(hours_ahead=4):
     ci68 = (math.exp(log_mean - log_std), math.exp(log_mean + log_std))
     ci95 = (math.exp(log_mean - 1.96 * log_std), math.exp(log_mean + 1.96 * log_std))
 
-    # -------- Ù…Ø­Ø§Ø³Ø¨Ù‡ Strategyâ€ŒÙ‡Ø§ --------
+    # -------- محاسبه استراتژی‌ها --------
     # Ichimoku
     ich = _ichimoku(highs, lows, closes)
-    ich_signal, ich_text = "âšª Ø®Ù†Ø«ÛŒ", "DataÙ” Ú©Ø§ÙÛŒ Ø¨Ø±Ø§ÛŒ Ø§Ø¨Ø± ÛŒØ§ ÙˆØ¶Ø¹ÛŒØª Ø¨ÛŒÙ† Ø§Ø¨Ø±Ù‡Ø§ Ø®Ù†Ø«ÛŒ Ø§Ø³Øª."
+    ich_signal, ich_text = "⚪ خنثی", "دادهٔ کافی برای ابر یا وضعیت بین ابرها خنثی است."
     ich_low, ich_high = None, None
     if ich:
         above_cloud = ich["close"] > max(ich["spanA"], ich["spanB"])
         below_cloud = ich["close"] < min(ich["spanA"], ich["spanB"])
         tenkan_above = ich["tenkan"] > ich["kijun"]
         if above_cloud and tenkan_above:
-            ich_signal = "ðŸŸ¢ ØµØ¹ÙˆØ¯ÛŒ"
-            ich_text = "Price UpÛŒ Ø§Ø¨Ø± Ø§ÛŒÚ†ÛŒÙ…ÙˆÚ©Ùˆ Ùˆ ØªÙ†Ú©Ø§Ù†â€ŒØ³Ù† UpÛŒ Ú©ÛŒØ¬ÙˆÙ†â€ŒØ³Ù† â†’ Ø¨Ø±ØªØ±ÛŒ Ø®Ø±ÛŒØ¯Ø§Ø±Ø§Ù†."
+            ich_signal = "🟢 صعودی"
+            ich_text = "قیمت بالای ابر ایچیموکو و تنکان‌سن بالای کیجون‌سن → برتری خریداران."
             ich_low, ich_high = ich["kijun"], max(ich["spanA"], ich["spanB"]) * 1.01
         elif below_cloud and not tenkan_above:
-            ich_signal = "ðŸ”´ Ù†Ø²ÙˆÙ„ÛŒ"
-            ich_text = "Price Ø²ÛŒØ± Ø§Ø¨Ø± Ø§ÛŒÚ†ÛŒÙ…ÙˆÚ©Ùˆ Ùˆ ØªÙ†Ú©Ø§Ù†â€ŒØ³Ù† Ø²ÛŒØ± Ú©ÛŒØ¬ÙˆÙ†â€ŒØ³Ù† â†’ ÙØ´Ø§Ø± ÙØ±ÙˆØ´ Ø¨ÛŒØ´ØªØ±."
+            ich_signal = "🔴 نزولی"
+            ich_text = "قیمت زیر ابر ایچیموکو و تنکان‌سن زیر کیجون‌سن → فشار فروش بیشتر."
             ich_low, ich_high = min(ich["spanA"], ich["spanB"]) * 0.99, ich["kijun"]
         else:
-            ich_signal = "âšª Ø®Ù†Ø«ÛŒ"
-            ich_text = "Price Ø¯Ø§Ø®Ù„/Ù†Ø²Ø¯ÛŒÚ© Ø§Ø¨Ø± Ø§Ø³Øª ÛŒØ§ Ø³ÛŒÚ¯Ù†Ø§Ù„â€ŒÙ‡Ø§ Ù…ØªÙ†Ø§Ù‚Ø¶â€ŒØ§Ù†Ø¯."
+            ich_signal = "⚪ خنثی"
+            ich_text = "قیمت داخل/نزدیک ابر است یا سیگنال‌ها متناقض‌اند."
             ich_low, ich_high = min(ich["spanA"], ich["spanB"]), max(ich["spanA"], ich["spanB"])
 
     # Stoch RSI
     stoch, dval = _stoch_rsi(closes)
     if stoch >= 80:
-        stoch_signal = "ðŸ”´ Ù†Ø²ÙˆÙ„ÛŒ"
-        stoch_text = "Ø§Ø´Ø¨Ø§Ø¹ Ø®Ø±ÛŒØ¯ â†’ Ø§Ø­ØªÙ…Ø§Ù„ Ø§ÙØ²Ø§ÛŒØ´ ÙØ´Ø§Ø± ÙØ±ÙˆØ´."
+        stoch_signal = "🔴 نزولی"
+        stoch_text = "اشباع خرید → احتمال افزایش فشار فروش."
         stoch_low, stoch_high = ci68[0], max(point, ci68[1] * 0.99)
     elif stoch <= 20:
-        stoch_signal = "ðŸŸ¢ ØµØ¹ÙˆØ¯ÛŒ"
-        stoch_text = "Ø§Ø´Ø¨Ø§Ø¹ ÙØ±ÙˆØ´ â†’ Ø§Ø­ØªÙ…Ø§Ù„ ÙˆØ±ÙˆØ¯ Ø®Ø±ÛŒØ¯Ø§Ø±Ø§Ù†."
+        stoch_signal = "🟢 صعودی"
+        stoch_text = "اشباع فروش → احتمال ورود خریداران."
         stoch_low, stoch_high = min(point, ci68[0] * 1.01), ci68[1]
     else:
-        stoch_signal = "âšª Ø®Ù†Ø«ÛŒ"
-        stoch_text = "Ø¯Ø± Ù…Ø­Ø¯ÙˆØ¯Ù‡Ù” Ù…ÛŒØ§Ù†ÛŒ Ø§Ø³ØªØ› Ø³ÛŒÚ¯Ù†Ø§Ù„ Ù‚ÙˆÛŒ Ù†Ø¯Ø§Ø±Ø¯."
+        stoch_signal = "⚪ خنثی"
+        stoch_text = "در محدودهٔ میانی است؛ سیگنال قوی ندارد."
         stoch_low, stoch_high = ci68
 
     # ATR (Volatility)
     atr_val = _atr(highs, lows, closes, 14)
-    # Ù†Ø³Ø¨Øª ATR Ø¨Ù‡ Price Ø¨Ø±Ø§ÛŒ ØªØ®Ù…ÛŒÙ† Ø´Ø¯Øª Ù†ÙˆØ³Ø§Ù†
+    # نسبت ATR به قیمت برای تخمین شدت نوسان
     atr_ratio = (atr_val / last_price) if last_price else 0.0
     if atr_ratio >= 0.02:
-        atr_signal = "ðŸ”´ Ù†ÙˆØ³Ø§Ù† Up"
-        atr_text = "Ù†ÙˆØ³Ø§Ù† Ú©ÙˆØªØ§Ù‡â€ŒÙ…Ø¯Øª UpØ³Øª â†’ Ø±ÛŒØ³Ú© Ø­Ø±Ú©Ø§Øª ØªÙ†Ø¯."
-        # Ø¨Ø§Ø²Ù‡ Ø¨Ø§Ø²ØªØ±
+        atr_signal = "🔴 نوسان بالا"
+        atr_text = "نوسان کوتاه‌مدت بالاست → ریسک حرکات تند."
+        # بازه بازتر
         atr_low, atr_high = ci95
     elif atr_ratio <= 0.008:
-        atr_signal = "ðŸŸ¢ Ù†ÙˆØ³Ø§Ù† Ú©Ù…"
-        atr_text = "Ù†ÙˆØ³Ø§Ù† Downâ€ŒØªØ± Ø§Ø² Ù…Ø¹Ù…ÙˆÙ„ â†’ Ø­Ø±Ú©Øª Ø¢Ø±Ø§Ù…â€ŒØªØ± Ù…Ø­ØªÙ…Ù„."
-        # Ø¨Ø§Ø²Ù‡ ÙØ´Ø±Ø¯Ù‡â€ŒØªØ±
+        atr_signal = "🟢 نوسان کم"
+        atr_text = "نوسان پایین‌تر از معمول → حرکت آرام‌تر محتمل."
+        # بازه فشرده‌تر
         mid = point
         w = (ci68[1] - ci68[0]) * 0.5
         atr_low, atr_high = mid - w * 0.6, mid + w * 0.6
     else:
-        atr_signal = "âšª Ù†Ø±Ù…Ø§Ù„"
-        atr_text = "Ù†ÙˆØ³Ø§Ù† Ø¯Ø± Ù…Ø­Ø¯ÙˆØ¯Ù‡Ù” Ù…Ø¹Ù…ÙˆÙ„ Market Ø§Ø³Øª."
+        atr_signal = "⚪ نرمال"
+        atr_text = "نوسان در محدودهٔ معمول بازار است."
         atr_low, atr_high = ci68
 
     # Golden/Death Cross (SMA50/200)
     sma50 = _sma(closes, 50)
     sma200 = _sma(closes, 200)
     if sma50 > sma200:
-        gd_signal = "ðŸŸ¢ ØµØ¹ÙˆØ¯ÛŒ"
-        gd_text = "Ù…ÛŒØ§Ù†Ú¯ÛŒÙ† ÛµÛ° UpÛŒ Û²Û°Û° â†’ Ø±ÙˆÙ†Ø¯ Ù…ÛŒØ§Ù†â€ŒÙ…Ø¯Øª Ù…Ø«Ø¨Øª."
+        gd_signal = "🟢 صعودی"
+        gd_text = "میانگین ۵۰ بالای ۲۰۰ → روند میان‌مدت مثبت."
         gd_low, gd_high = max(ci68[0], sma200 * 0.995), ci68[1] * 1.01
     elif sma50 < sma200:
-        gd_signal = "ðŸ”´ Ù†Ø²ÙˆÙ„ÛŒ"
-        gd_text = "Ù…ÛŒØ§Ù†Ú¯ÛŒÙ† ÛµÛ° Ø²ÛŒØ± Û²Û°Û° â†’ Ø±ÙˆÙ†Ø¯ Ù…ÛŒØ§Ù†â€ŒÙ…Ø¯Øª Ù…Ù†ÙÛŒ."
+        gd_signal = "🔴 نزولی"
+        gd_text = "میانگین ۵۰ زیر ۲۰۰ → روند میان‌مدت منفی."
         gd_low, gd_high = ci68[0] * 0.99, min(ci68[1], sma200 * 1.005)
     else:
-        gd_signal = "âšª Ø®Ù†Ø«ÛŒ"
-        gd_text = "ØªÙØ§ÙˆØª Ù…Ø¹Ù†Ø§Ø¯Ø§Ø± Ø¨ÛŒÙ† MA50 Ùˆ MA200 Ø¯ÛŒØ¯Ù‡ Ù†Ù…ÛŒâ€ŒØ´ÙˆØ¯."
+        gd_signal = "⚪ خنثی"
+        gd_text = "تفاوت معنادار بین MA50 و MA200 دیده نمی‌شود."
         gd_low, gd_high = ci68
 
     # VWAP
     vwap = _vwap(highs, lows, closes, vols)
     if vwap is not None:
         if last_price > vwap * 1.002:
-            vwap_signal = "ðŸŸ¢ Ø­Ù…Ø§ÛŒØªÛŒ"
-            vwap_text = "Price UpÛŒ VWAP â†’ Ø¯Ø³Øª Up Ø¨Ø§ Ø®Ø±ÛŒØ¯Ø§Ø±Ø§Ù†."
+            vwap_signal = "🟢 حمایتی"
+            vwap_text = "قیمت بالای VWAP → دست بالا با خریداران."
             vwap_low, vwap_high = max(ci68[0], vwap), ci68[1] * 1.005
         elif last_price < vwap * 0.998:
-            vwap_signal = "ðŸ”´ Ù…Ù‚Ø§ÙˆÙ…ØªÛŒ"
-            vwap_text = "Price Ø²ÛŒØ± VWAP â†’ ÙØ±ÙˆØ´Ù†Ø¯Ú¯Ø§Ù† ÙØ¹Ø§Ù„â€ŒØªØ±Ù†Ø¯."
+            vwap_signal = "🔴 مقاومتی"
+            vwap_text = "قیمت زیر VWAP → فروشندگان فعال‌ترند."
             vwap_low, vwap_high = ci68[0] * 0.995, min(ci68[1], vwap)
         else:
-            vwap_signal = "âšª Ø®Ù†Ø«ÛŒ"
-            vwap_text = "Price Ù†Ø²Ø¯ÛŒÚ© VWAP â†’ ØªØ¹Ø§Ø¯Ù„ Ù†Ø³Ø¨ÛŒ."
+            vwap_signal = "⚪ خنثی"
+            vwap_text = "قیمت نزدیک VWAP → تعادل نسبی."
             vwap_low, vwap_high = ci68
     else:
-        vwap_signal = "âšª Ø®Ù†Ø«ÛŒ"
-        vwap_text = "DataÙ” Ú©Ø§ÙÛŒ Ø¨Ø±Ø§ÛŒ VWAP Ù…ÙˆØ¬ÙˆØ¯ Ù†ÛŒØ³Øª."
+        vwap_signal = "⚪ خنثی"
+        vwap_text = "دادهٔ کافی برای VWAP موجود نیست."
         vwap_low, vwap_high = ci68
 
     strategies = [
-        ("Ø§ÛŒÚ†ÛŒÙ…ÙˆÚ©Ùˆ", ich_signal, ich_text, ich_low, ich_high),
-        ("Ø§Ø³ØªÙˆÚ© RSI", stoch_signal, stoch_text, stoch_low, stoch_high),
+        ("ایچیموکو", ich_signal, ich_text, ich_low, ich_high),
+        ("استوک RSI", stoch_signal, stoch_text, stoch_low, stoch_high),
         ("ATR", atr_signal, atr_text, atr_low, atr_high),
-        ("Ú©Ø±Ø§Ø³ Ø·Ù„Ø§ÛŒÛŒ/Ù…Ø±Ú¯", gd_signal, gd_text, gd_low, gd_high),
+        ("کراس طلایی/مرگ", gd_signal, gd_text, gd_low, gd_high),
         ("VWAP", vwap_signal, vwap_text, vwap_low, vwap_high),
     ]
 
@@ -661,11 +661,11 @@ def predict_btc_price(hours_ahead=4):
         "strategies": strategies
     }
 
-# ------------------ ØªØºÛŒÛŒØ± Ø¸Ø§Ù‡Ø± ÙÙ‚Ø· Ø¯Ø± Ø®Ø±ÙˆØ¬ÛŒ Prediction ------------------
+# ------------------ تغییر ظاهر فقط در خروجی پیش‌بینی ------------------
 def build_btc_forecast_text(hours=4):
     res = predict_btc_price(hours)
     if "error" in res:
-        return f"âš ï¸ {res['error']}"
+        return f"⚠️ {res['error']}"
 
     last  = res["last"]
     point = res["point"]
@@ -675,24 +675,24 @@ def build_btc_forecast_text(hours=4):
     trend_pc = res["trend"] * 100
     source = res["source"]
 
-    # Ø®Ù„Ø§ØµÙ‡ ÙØ´Ø±Ø¯Ù‡ Ùˆ Ø®ÙˆØ§Ù†Ø§ØªØ±
+    # خلاصه فشرده و خواناتر
     summary = (
-        f"ðŸ”® *Prediction BTC ({hours}h)*\n"
-        f"ðŸ“Š Data: *{source}*\n"
-        f"ðŸ’µ Price ÙØ¹Ù„ÛŒ: *${last:,.2f}*\n"
-        f"ðŸŽ¯ Prediction: *${point:,.2f}*\n"
-        f"ðŸ“ Ø¨Ø§Ø²Ù‡ Û¶Û¸Ùª: `${l68:,.0f} â€” {u68:,.0f}`\n"
-        f"ðŸ“ Ø¨Ø§Ø²Ù‡ Û¹ÛµÙª: `${l95:,.0f} â€” {u95:,.0f}`\n"
-        f"ðŸ“ˆ EMA12-26: {trend_pc:.2f}% | ðŸ”„ RSI(14): {rsi_val:.1f}\n"
+        f"🔮 *پیش‌بینی BTC ({hours}h)*\n"
+        f"📊 داده: *{source}*\n"
+        f"💵 قیمت فعلی: *${last:,.2f}*\n"
+        f"🎯 پیش‌بینی: *${point:,.2f}*\n"
+        f"📏 بازه ۶۸٪: `${l68:,.0f} — {u68:,.0f}`\n"
+        f"📐 بازه ۹۵٪: `${l95:,.0f} — {u95:,.0f}`\n"
+        f"📈 EMA12-26: {trend_pc:.2f}% | 🔄 RSI(14): {rsi_val:.1f}\n"
     )
 
-    # Ø³ÛŒÚ¯Ù†Ø§Ù„ Strategyâ€ŒÙ‡Ø§ Ø¨Ù‡â€ŒØµÙˆØ±Øª Ù„ÛŒØ³Øª ØªÙ…ÛŒØ²
-    strategies_text = "\nðŸ“Š *Ø³ÛŒÚ¯Ù†Ø§Ù„ Strategyâ€ŒÙ‡Ø§:*\n"
+    # سیگنال استراتژی‌ها به‌صورت لیست تمیز
+    strategies_text = "\n📊 *سیگنال استراتژی‌ها:*\n"
     for name, sig, desc, lo, hi in res["strategies"]:
-        rng = f"\n    ðŸŽ¯ ${lo:,.0f} â€” ${hi:,.0f}" if lo and hi else ""
-        strategies_text += f"â€¢ *{name}*: {sig}\n    {desc}{rng}\n"
+        rng = f"\n    🎯 ${lo:,.0f} — ${hi:,.0f}" if lo and hi else ""
+        strategies_text += f"• *{name}*: {sig}\n    {desc}{rng}\n"
 
-    return summary + strategies_text + "\nâš ï¸ Ø§ÛŒÙ† ÙÙ‚Ø· ØªØ­Ù„ÛŒÙ„ Ø¢Ù…Ø§Ø±ÛŒ Ùˆ Ø¢Ù…ÙˆØ²Ø´ÛŒ Ø§Ø³Øª."
+    return summary + strategies_text + "\n⚠️ این فقط تحلیل آماری و آموزشی است."
 
 def build_btc_forecast_chart(hours=4):
     res = predict_btc_price(hours)
@@ -703,7 +703,7 @@ def build_btc_forecast_chart(hours=4):
     forecast = res["point"]
     l95, u95 = res["ci95"]
 
-    # Ø§Ø³ØªØ§ÛŒÙ„ ÙÙ‚Ø· Ø¸Ø§Ù‡Ø±ÛŒ
+    # استایل فقط ظاهری
     plt.style.use("dark_background")
     plt.figure(figsize=(9,5))
     plt.plot(closes[-100:], label="Price", color="#00BFFF", linewidth=2)
@@ -712,7 +712,7 @@ def build_btc_forecast_chart(hours=4):
     plt.axhline(u95, color="#FF4500", linestyle=":", linewidth=1.5, label="CI95 High")
 
     last_price = closes[-1]
-    # Ù†Ù…Ø§ÛŒØ´ Ø¢Ø®Ø±ÛŒÙ† Price Ø±ÙˆÛŒ Ù†Ù…ÙˆØ¯Ø§Ø±
+    # نمایش آخرین قیمت روی نمودار
     plt.text(len(closes[-100:]) - 1, last_price, f"${last_price:,.0f}", color="white")
 
     plt.title(f"BTC Forecast (next {hours}h)", fontsize=14, color="white")
@@ -725,47 +725,47 @@ def build_btc_forecast_chart(hours=4):
     plt.close()
     return buf, None
     
-# ================== Ù…Ù†ÙˆÙ‡Ø§ ==================
+# ================== منوها ==================
 def send_interval_menu(chat_id):
     """
-    âœ… ÙÙ‚Ø· ØªÙ†Ø¸ÛŒÙ… Ø¨Ø§Ø²Ù‡ Report Intervalâ€ŒØ§ÛŒ
-    (Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ 'Prediction' Ùˆ 'ØªØ§Ù¾Û±Û°' Ø§Ø² Ø§ÛŒÙ† Ù…Ù†Ùˆ Ø­Ø°Ù Ø´Ø¯Ù†Ø¯)
+    ✅ فقط تنظیم بازه گزارش دوره‌ای
+    (دکمه‌های 'پیش‌بینی' و 'تاپ۱۰' از این منو حذف شدند)
     """
     markup = InlineKeyboardMarkup()
     options = [
-        ("1 Ø¯Ù‚ÛŒÙ‚Ù‡", 1),
-        ("15 Ø¯Ù‚ÛŒÙ‚Ù‡", 15),
-        ("30 Ø¯Ù‚ÛŒÙ‚Ù‡", 30),
-        ("4 Ø³Ø§Ø¹Øª", 240),
-        ("24 Ø³Ø§Ø¹Øª", 1440),
+        ("1 دقیقه", 1),
+        ("15 دقیقه", 15),
+        ("30 دقیقه", 30),
+        ("4 ساعت", 240),
+        ("24 ساعت", 1440),
     ]
     for text, val in options:
         markup.add(InlineKeyboardButton(text, callback_data=f"interval_{val}"))
-    bot.send_message(chat_id, "â± Ø¨Ø§Ø²Ù‡ Report Ø±Ùˆ Select Ú©Ù†:", reply_markup=markup)
+    bot.send_message(chat_id, "⏱ بازه گزارش رو انتخاب کن:", reply_markup=markup)
 
 def send_predict_menu(chat_id):
     """
-    âœ… Ù…Ù†ÙˆÛŒ Select Ø¨Ø§Ø²Ù‡ Prediction BTC
-    Ø§Ø² Ø·Ø±ÛŒÙ‚ /predict Ø¨Ø§Ø² Ù…ÛŒâ€ŒØ´ÙˆØ¯.
+    ✅ منوی انتخاب بازه پیش‌بینی BTC
+    از طریق /predict باز می‌شود.
     """
     markup = InlineKeyboardMarkup()
     hour_opts = [1, 2, 4, 8, 12, 24]
     row = []
     for h in hour_opts:
-        row.append(InlineKeyboardButton(f"{h} Ø³Ø§Ø¹Øª", callback_data=f"predict_h_{h}"))
+        row.append(InlineKeyboardButton(f"{h} ساعت", callback_data=f"predict_h_{h}"))
         if len(row) == 3:
             markup.row(*row)
             row = []
     if row:
         markup.row(*row)
-    bot.send_message(chat_id, "ðŸ”® Ø¨Ø§Ø²Ù‡ Prediction BTC Ø±Ùˆ Select Ú©Ù†:", reply_markup=markup)
-# Ù‡Ø± Û´ Ø³Ø§Ø¹Øª Report Ø®ÙˆØ¯Ú©Ø§Ø±
+    bot.send_message(chat_id, "🔮 بازه پیش‌بینی BTC رو انتخاب کن:", reply_markup=markup)
+# هر ۴ ساعت گزارش خودکار
     
 
 
-# ================== Settings Ù„ÛŒÚ©ÙˆÛŒÛŒØ¯ÛŒØ´Ù† ==================
-LIQ_THRESHOLD = 10   # ðŸ”¹ ØªØ³ØªÛŒ: UpÛŒ Û±Û° Ø¯Ù„Ø§Ø± (Ø¨Ø¹Ø¯Ø§Ù‹ Ø¨Ø²Ù† 1_000_000)
-MAX_LIQS = 10        # Ø­Ø¯Ø§Ú©Ø«Ø± Û±Û° Ø±Ú©ÙˆØ±Ø¯ Ù†Ú¯Ù‡Ø¯Ø§Ø±ÛŒ Ø¨Ø´Ù‡
+# ================== تنظیمات لیکوییدیشن ==================
+LIQ_THRESHOLD = 10   # 🔹 تستی: بالای ۱۰ دلار (بعداً بزن 1_000_000)
+MAX_LIQS = 10        # حداکثر ۱۰ رکورد نگهداری بشه
 liq_list = []
 
 # ================== Binance WebSocket ==================
@@ -775,7 +775,7 @@ BINANCE_WS = (
 )
 
 def start_binance_ws():
-    """Start ÙˆØ¨â€ŒØ³ÙˆÚ©Øª Ø¨Ø§ÛŒÙ†Ù†Ø³ Ø¨Ø±Ø§ÛŒ Ú¯Ø±ÙØªÙ† Ù„ÛŒÚ©ÙˆÛŒÛŒØ¯ÛŒØ´Ù†â€ŒÙ‡Ø§"""
+    """شروع وب‌سوکت بایننس برای گرفتن لیکوییدیشن‌ها"""
     def on_message(ws, message):
         try:
             data = json.loads(message)
@@ -789,15 +789,15 @@ def start_binance_ws():
 
             if notional >= LIQ_THRESHOLD:
                 event = (
-                    f"ðŸ”´ Liquidation\n"
-                    f"ðŸ“Œ Symbol: {symbol}\n"
-                    f"ðŸ“ˆ Side: {side}\n"
-                    f"ðŸ’° Notional: {notional:.2f} USD\n"
-                    f"ðŸ’² Price: {price}\n"
-                    f"ðŸ“¦ Quantity: {qty}"
+                    f"🔴 Liquidation\n"
+                    f"📌 Symbol: {symbol}\n"
+                    f"📈 Side: {side}\n"
+                    f"💰 Notional: {notional:.2f} USD\n"
+                    f"💲 Price: {price}\n"
+                    f"📦 Quantity: {qty}"
                 )
 
-                # Ø°Ø®ÛŒØ±Ù‡ Ø¯Ø± Ù„ÛŒØ³Øª
+                # ذخیره در لیست
                 liq_list.append(event)
                 if len(liq_list) > MAX_LIQS:
                     liq_list.pop(0)
@@ -806,17 +806,17 @@ def start_binance_ws():
                 print("-" * 30)
 
         except Exception as e:
-            print("âŒ Error parsing message:", e)
+            print("❌ Error parsing message:", e)
             print("Raw:", message)
 
     def on_error(ws, error):
-        print("âŒ WebSocket Error:", error)
+        print("❌ WebSocket Error:", error)
 
     def on_close(ws, close_status_code, close_msg):
-        print("ðŸ”Œ WebSocket Connection closed")
+        print("🔌 WebSocket Connection closed")
 
     def on_open(ws):
-        print("âœ… Connected to Binance WebSocket (BTC/ETH/BNB)")
+        print("✅ Connected to Binance WebSocket (BTC/ETH/BNB)")
 
     ws = websocket.WebSocketApp(
         BINANCE_WS,
@@ -828,22 +828,22 @@ def start_binance_ws():
     ws.run_forever()
 
 def run_ws_thread():
-    """Ø§Ø¬Ø±Ø§ÛŒ ÙˆØ¨â€ŒØ³ÙˆÚ©Øª Ø¯Ø± ØªØ±Ø¯ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡"""
+    """اجرای وب‌سوکت در ترد جداگانه"""
     ws_thread = threading.Thread(target=start_binance_ws, daemon=True)
     ws_thread.start()
 
 def get_liq_report():
-    """Ù…ØªÙ† Report Ù„ÛŒÚ©ÙˆÛŒÛŒØ¯ÛŒØ´Ù†â€ŒÙ‡Ø§"""
+    """متن گزارش لیکوییدیشن‌ها"""
     if not liq_list:
-        return "âš ï¸ Ù‡Ù†ÙˆØ² Ù„ÛŒÚ©ÙˆÛŒÛŒØ¯ÛŒØ´Ù†ÛŒ Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡."
+        return "⚠️ هنوز لیکوییدیشنی ثبت نشده."
     return "\n\n".join(liq_list)
 
-# ================== Ø¯Ø³ØªÙˆØ±Ø§Øª ØªÙ„Ú¯Ø±Ø§Ù… ==================
+# ================== دستورات تلگرام ==================
 @bot.message_handler(commands=["liqs"])
 def send_liqs(message):
     bot.reply_to(message, get_liq_report())
 
-# Ù‡Ø± Û´ Ø³Ø§Ø¹Øª Report Ø¨Ø±Ø§ÛŒ Ù‡Ù…Ù‡ Ù…Ø´ØªØ±Ú©â€ŒÙ‡Ø§
+# هر ۴ ساعت گزارش برای همه مشترک‌ها
 def auto_send_liqs():
     report = get_liq_report()
     for user in subscribers:
@@ -855,23 +855,23 @@ def auto_send_liqs():
 schedule.every(4).hours.do(auto_send_liqs)
 
 
-# ================== Timeâ€ŒØ¨Ù†Ø¯ÛŒ ==================
- # Ù‡Ø± Û± Ø¯Ù‚ÛŒÙ‚Ù‡ Ø¯ÛŒØªØ§ÛŒ Ø¬Ø¯ÛŒØ¯
-schedule.every(4).hours.do(auto_send_liqs)      # Ù‡Ø± Û´ Ø³Ø§Ø¹Øª Report Ø®ÙˆØ¯Ú©Ø§Ø±    
+# ================== زمان‌بندی ==================
+ # هر ۱ دقیقه دیتای جدید
+schedule.every(4).hours.do(auto_send_liqs)      # هر ۴ ساعت گزارش خودکار    
     
-# ================== Ø¯Ø³ØªÙˆØ±Ø§Øª ==================
+# ================== دستورات ==================
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     user_wallets.setdefault(chat_id, [])
     user_intervals[chat_id] = 1
     send_message(chat_id,
-        "Ø³Ù„Ø§Ù… ðŸ‘‹\n"
-        "Address ÙˆÙ„Øªâ€ŒÙ‡Ø§Øª Ø±Ùˆ Ø¨ÙØ±Ø³Øª ØªØ§ Ø¨Ø±Ø§Øª Ù…Ø§Ù†ÛŒØªÙˆØ± Ú©Ù†Ù….\n\n"
-        "ðŸ“ /stop â†’ Stop Ù…Ø§Ù†ÛŒØªÙˆØ±ÛŒÙ†Ú¯\n"
-        "ðŸ“ /interval â†’ ØªØºÛŒÛŒØ± Ø¨Ø§Ø²Ù‡ Report\n"
-        "ðŸ“ /top10 â†’ Report Û±Û° Ø§Ø±Ø² Ø¨Ø±ØªØ±\n"
-        "ðŸ“ /predict â†’ Prediction Ø¨ÛŒØªâ€ŒÚ©ÙˆÛŒÙ† (Select Ø¨Ø§Ø²Ù‡)"
+        "سلام 👋\n"
+        "آدرس ولت‌هات رو بفرست تا برات مانیتور کنم.\n\n"
+        "📍 /stop → توقف مانیتورینگ\n"
+        "📍 /interval → تغییر بازه گزارش\n"
+        "📍 /top10 → گزارش ۱۰ ارز برتر\n"
+        "📍 /predict → پیش‌بینی بیت‌کوین (انتخاب بازه)"
     )
 
 @bot.message_handler(commands=['stop'])
@@ -879,7 +879,7 @@ def stop(message):
     chat_id = message.chat.id
     user_wallets.pop(chat_id, None)
     user_intervals.pop(chat_id, None)
-    send_message(chat_id, "â¹ Ù…Ø§Ù†ÛŒØªÙˆØ±ÛŒÙ†Ú¯ Ù…Stop Ø´Ø¯.")
+    send_message(chat_id, "⏹ مانیتورینگ متوقف شد.")
 
 @bot.message_handler(commands=['interval'])
 def interval(message):
@@ -903,18 +903,18 @@ def add_wallet(message):
     chat_id = message.chat.id
     text = (message.text or "").strip()
 
-    # Ú†Ù†Ø¯ ÙˆØ±ÙˆØ¯ÛŒ Ø±Ø§ Ø¨Ø§ ÙØ§ØµÙ„Ù‡/Ú©Ø§Ù…Ø§/Ø®Ø·â€ŒØ¬Ø¯ÛŒØ¯ Ø¬Ø¯Ø§ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ…
+    # چند ورودی را با فاصله/کاما/خط‌جدید جدا می‌کنیم
     parts = re.split(r'[\s,]+', text)
     parts = [p.strip() for p in parts if p.strip()]
 
     if not parts:
-        send_message(chat_id, "âŒ Ù„Ø·ÙØ§Ù‹ Ø­Ø¯Ø§Ù‚Ù„ ÛŒÚ© Address ÙˆÙ„Øª Ø¨ÙØ±Ø³Øª.")
+        send_message(chat_id, "❌ لطفاً حداقل یک آدرس ولت بفرست.")
         return
 
-    # Ø§Ø³ØªÙØ§Ø¯Ù‡ Ø§Ø² Ø§Ø¹ØªØ¨Ø§Ø±Ø³Ù†Ø¬ÛŒ Ø³ÙØªâ€ŒÙˆØ³Ø®Øª
+    # استفاده از اعتبارسنجی سفت‌وسخت
     valid, errors = validate_wallet_inputs(parts)
 
-    # Ø§ÙØ²ÙˆØ¯Ù† Ù…ÙˆØ§Ø±Ø¯ Ù…Ø¹ØªØ¨Ø± (Ø¨Ø¯ÙˆÙ† ØªÚ©Ø±Ø§Ø±)
+    # افزودن موارد معتبر (بدون تکرار)
     added = []
     if valid:
         user_wallets.setdefault(chat_id, [])
@@ -923,23 +923,23 @@ def add_wallet(message):
                 user_wallets[chat_id].append(w)
                 added.append(w)
 
-    # Ø³Ø§Ø®Øª Ù¾ÛŒØ§Ù… Ø®Ø±ÙˆØ¬ÛŒ
+    # ساخت پیام خروجی
     msg_lines = []
     if added:
-        msg_lines.append(f"âœ… {len(added)} ÙˆÙ„Øª Ù…Ø¹ØªØ¨Ø± Ø§Ø¶Ø§ÙÙ‡ Ø´Ø¯:")
+        msg_lines.append(f"✅ {len(added)} ولت معتبر اضافه شد:")
         msg_lines.extend([f"- `{w}`" for w in added])
     if errors:
-        msg_lines.append("âŒ Ù…ÙˆØ§Ø±Ø¯ Ù†Ø§Ù…Ø¹ØªØ¨Ø±:")
+        msg_lines.append("❌ موارد نامعتبر:")
         for err in errors:
-            reason = err.get('reason', 'Ù†Ø§Ù…Ø¹ØªØ¨Ø±')
-            msg_lines.append(f"- `{err['input']}` â†’ {reason}")
+            reason = err.get('reason', 'نامعتبر')
+            msg_lines.append(f"- `{err['input']}` → {reason}")
 
     if not msg_lines:
-        msg_lines = ["âš ï¸ Ù‡ÛŒÚ† ÙˆÙ„Øª Ø¬Ø¯ÛŒØ¯ÛŒ Ø§Ø¶Ø§ÙÙ‡ Ù†Ø´Ø¯."]
+        msg_lines = ["⚠️ هیچ ولت جدیدی اضافه نشد."]
 
     send_message(chat_id, "\n".join(msg_lines))
 
-# ================== Ø§Ø¬Ø±Ø§ÛŒ Timeâ€ŒØ¨Ù†Ø¯ÛŒ ==================
+# ================== اجرای زمان‌بندی ==================
 def run_scheduler():
     schedule.every(1).minutes.do(check_positions)
     schedule.every(1).minutes.do(periodic_report)
@@ -948,35 +948,35 @@ def run_scheduler():
         time.sleep(1)
 
 threading.Thread(target=run_scheduler, daemon=True).start()
-# ================== Ù‡Ù†Ø¯Ù„Ø± Ø¯Ú©Ù…Ù‡â€ŒÙ‡Ø§ÛŒ Ø´ÛŒØ´Ù‡â€ŒØ§ÛŒ ==================
+# ================== هندلر دکمه‌های شیشه‌ای ==================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     chat_id = call.message.chat.id
     data = call.data
 
-    # --- Ù‡Ù†Ø¯Ù„Ø± ØªØºÛŒÛŒØ± Ø¨Ø§Ø²Ù‡ Report Intervalâ€ŒØ§ÛŒ ---
+    # --- هندلر تغییر بازه گزارش دوره‌ای ---
     if data.startswith("interval_"):
         try:
             val = int(data.split("_")[1])
             user_intervals[chat_id] = val
-            bot.answer_callback_query(call.id, f"Ø¨Ø§Ø²Ù‡ Report {val} Ø¯Ù‚ÛŒÙ‚Ù‡ ØªÙ†Ø¸ÛŒÙ… Ø´Ø¯ âœ…")
-            send_message(chat_id, f"â± Ø¨Ø§Ø²Ù‡ Report Ø¨Ù‡ {val} Ø¯Ù‚ÛŒÙ‚Ù‡ ØªØºÛŒÛŒØ± Ú©Ø±Ø¯.")
+            bot.answer_callback_query(call.id, f"بازه گزارش {val} دقیقه تنظیم شد ✅")
+            send_message(chat_id, f"⏱ بازه گزارش به {val} دقیقه تغییر کرد.")
         except:
-            bot.answer_callback_query(call.id, "Error Ø¯Ø± Ù¾Ø±Ø¯Ø§Ø²Ø´ Ø¨Ø§Ø²Ù‡ âŒ")
+            bot.answer_callback_query(call.id, "خطا در پردازش بازه ❌")
 
-    # --- Ù‡Ù†Ø¯Ù„Ø± Prediction Ø¨ÛŒØªâ€ŒÚ©ÙˆÛŒÙ† ---
+    # --- هندلر پیش‌بینی بیت‌کوین ---
     elif data.startswith("predict_h_"):
         try:
             hours = int(data.split("_")[2])
-            bot.answer_callback_query(call.id, f"Prediction Ø¨Ø±Ø§ÛŒ {hours} Ø³Ø§Ø¹Øª Ø¢ÛŒÙ†Ø¯Ù‡ â³")
+            bot.answer_callback_query(call.id, f"پیش‌بینی برای {hours} ساعت آینده ⏳")
 
             text = build_btc_forecast_text(hours)
             chart, err = build_btc_forecast_chart(hours)
 
             if chart:
-                # Ú©Ù¾Ø´Ù† Ú©ÙˆØªØ§Ù‡ Ø¨Ø±Ø§ÛŒ ØªØµÙˆÛŒØ±
-                bot.send_photo(chat_id, chart, caption="ðŸ“Š Ù†Ù…ÙˆØ¯Ø§Ø± Prediction BTC")
-                # Ù…ØªÙ† Ú©Ø§Ù…Ù„ ØªØ­Ù„ÛŒÙ„ Ø¬Ø¯Ø§ Ø§Ø±Ø³Ø§Ù„ Ù…ÛŒØ´Ù‡
+                # کپشن کوتاه برای تصویر
+                bot.send_photo(chat_id, chart, caption="📊 نمودار پیش‌بینی BTC")
+                # متن کامل تحلیل جدا ارسال میشه
                 send_message(chat_id, text)
             else:
                 if err:
@@ -985,10 +985,10 @@ def callback_query(call):
                     send_message(chat_id, text)
 
         except Exception as e:
-            send_message(chat_id, f"âš ï¸ Error Ø¯Ø± Prediction: {e}")
+            send_message(chat_id, f"⚠️ خطا در پیش‌بینی: {e}")
  
  
 if __name__ == "__main__":
-    run_ws_thread()         # ðŸ”¹ ÙˆØ¨â€ŒØ³ÙˆÚ©Øª Ø¨Ø§ÛŒÙ†Ù†Ø³ Ø±Ø§Ù‡ Ù…ÛŒÙØªÙ‡
-    print("ðŸš€ Bot started...")
+    run_ws_thread()         # 🔹 وب‌سوکت بایننس راه میفته
+    print("🚀 Bot started...")
     bot.infinity_polling()
