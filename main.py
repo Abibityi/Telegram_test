@@ -304,7 +304,7 @@ def send_predict_menu(chat_id):
 
 
 # ================== Liquidation Settings ==================
-LIQ_THRESHOLD = 10   # 🔹 Test: above 10 dollars (later change to 1_000_000)
+LIQ_THRESHOLD = 1000000   # 🔹 Test: above 10 dollars (later change to 1_000_000)
 MAX_LIQS = 10        # Keep maximum 10 records
 liq_list = []
 
